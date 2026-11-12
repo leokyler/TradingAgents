@@ -29,6 +29,8 @@ _ENV_OVERRIDES = {
     # Provider-specific reasoning/thinking knobs (None = each provider's own
     # default). Settable here for non-interactive runs; the CLI also offers an
     # interactive choice, which is skipped when the matching var is set.
+    "TRADINGAGENTS_QUICK_THINK_EFFORT":    "quick_think_reasoning_effort",
+    "TRADINGAGENTS_DEEP_THINK_EFFORT":     "deep_think_reasoning_effort",
     "TRADINGAGENTS_GOOGLE_THINKING_LEVEL":   "google_thinking_level",
     "TRADINGAGENTS_OPENAI_REASONING_EFFORT": "openai_reasoning_effort",
     "TRADINGAGENTS_ANTHROPIC_EFFORT":        "anthropic_effort",
@@ -106,6 +108,12 @@ def build_default_config() -> dict:
         "deep_think_provider": None,
         "quick_think_backend_url": None,
         "deep_think_backend_url": None,
+        # Reasoning effort per model tier. They override ``openai_reasoning_effort``
+        # for the tier that names one, so the analysts/debate/trader (quick) and
+        # the two managers (deep) can think at different depths. ``None`` falls
+        # back to the provider-wide value.
+        "quick_think_reasoning_effort": None,
+        "deep_think_reasoning_effort": None,
         # Provider-specific thinking configuration
         "google_thinking_level": None,      # "high", "minimal", etc.
         "openai_reasoning_effort": None,    # "medium", "high", "low"

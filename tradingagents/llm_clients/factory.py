@@ -87,8 +87,11 @@ def _coerce_max_tokens(value):
     return n
 
 
-# Providers that take OpenAI's ``openai_reasoning_effort``.
-REASONING_EFFORT_PROVIDERS = ("openai", "chatgpt")
+# Providers that take OpenAI's ``openai_reasoning_effort``. OpenCode Go is an
+# OpenAI-compatible gateway whose models advertise effort levels (low/high/max),
+# so the value travels there too; every other compatible provider is left alone
+# because an endpoint that does not know the field may reject the request.
+REASONING_EFFORT_PROVIDERS = ("openai", "chatgpt", "opencode-go")
 
 
 def build_llm_kwargs(config: dict) -> dict[str, Any]:
@@ -151,6 +154,13 @@ def create_tier_client(config: dict, tier: str, **extra) -> BaseLLMClient:
         base_url = config.get(f"{tier}_think_backend_url") or config.get("backend_url")
     else:
         base_url = config.get(f"{tier}_think_backend_url")
-    kwargs = build_llm_kwargs({**config, "llm_provider": provider})
+    # A tier that names its own effort overrides the provider-wide value; an
+    # unset tier keeps the shared setting, so existing configs behave the same.
+    tier_effort = config.get(f"{tier}_think_reasoning_effort") or config.get("openai_reasoning_effort")
+    kwargs = build_llm_kwargs({
+        **config,
+        "llm_provider": provider,
+        "openai_reasoning_effort": tier_effort,
+    })
     return create_llm_client(provider=provider, model=config[f"{tier}_think_llm"], base_url=base_url,
                              **kwargs, **extra)

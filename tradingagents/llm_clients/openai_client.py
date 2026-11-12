@@ -452,7 +452,13 @@ class OpenAIClient(BaseLLMClient):
         for key in _PASSTHROUGH_KWARGS:
             if key not in self.kwargs:
                 continue
-            if key == "reasoning_effort" and not _supports_reasoning_effort(self.model):
+            # The model-name gate is native-OpenAI behavior: api.openai.com 400s
+            # with the parameter on non-reasoning models. A compatible gateway
+            # (OpenCode Go) exposes effort levels of its own and takes the value
+            # as given, so the gate must not run there.
+            if (key == "reasoning_effort"
+                    and self.provider in ("openai", "chatgpt")
+                    and not _supports_reasoning_effort(self.model)):
                 continue
             llm_kwargs[key] = self.kwargs[key]
 
