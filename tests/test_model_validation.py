@@ -87,6 +87,27 @@ def test_every_provider_lets_you_name_your_own_model(provider, mode):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("mode", ["quick", "deep"])
+def test_every_provider_the_picker_offers_has_model_options(mode):
+    """A provider in the CLI menu must resolve a model list for both tiers.
+
+    OpenRouter and Azure were listed in the menu without a MODEL_OPTIONS entry,
+    so selecting either raised KeyError at the model prompt instead of letting
+    the user type a model name.
+    """
+    from cli.prompts import _llm_provider_table
+    from tradingagents.llm_clients.model_catalog import get_model_options
+
+    missing = []
+    for _display, provider, _url in _llm_provider_table():
+        try:
+            get_model_options(provider, mode)
+        except KeyError:
+            missing.append(provider)
+    assert missing == []
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("provider, model", [
     ("xai", "grok-4.20-0309-reasoning"),
     ("deepseek", "deepseek-v4-flash"),

@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -255,6 +256,43 @@ class ProviderSpec:
     # only to its pinned base_url, and never alongside an API key.
     credential: Callable[[], Callable[[], str]] | None = None
     pinned_base_url: bool = False             # refuse any other endpoint for this provider
+    # Request headers the provider requires beyond auth, e.g. a client identifier
+    # or a per-conversation session id. A callable because some values (a session
+    # id) are generated on first use and must stay stable for the process.
+    headers: Callable[[], dict[str, str]] | None = None
+
+
+# A stable per-process session id for OpenCode Go. Its docs ask every client to
+# send one on ``x-opencode-session`` per conversation so requests route
+# consistently and prompt caching can hit; a fresh id per request would defeat
+# both. ``OPENCODE_GO_SESSION_ID`` pins it across processes, which a scheduler
+# wants so separate runs share one conversation.
+_OPENCODE_SESSION_ID: str | None = None
+
+
+def _opencode_session_id() -> str:
+    """The OpenCode Go session id: the env override, else one per process."""
+    global _OPENCODE_SESSION_ID
+    if _OPENCODE_SESSION_ID is None:
+        _OPENCODE_SESSION_ID = (
+            os.environ.get("OPENCODE_GO_SESSION_ID") or uuid.uuid4().hex
+        ).strip()
+    return _OPENCODE_SESSION_ID
+
+
+def _opencode_go_headers() -> dict[str, str]:
+    """Headers OpenCode Go expects beyond the bearer token.
+
+    Its docs ask clients to identify themselves by name rather than as a generic
+    SDK, and to send the session id above; requests otherwise still work but miss
+    routing and cache affinity, and newer deployments may reject them.
+    """
+    from tradingagents import __version__
+
+    return {
+        "User-Agent": f"TradingAgents/{__version__}",
+        "x-opencode-session": _opencode_session_id(),
+    }
 
 
 # Single source of truth for the OpenAI-compatible provider family. Dual-region
@@ -271,6 +309,13 @@ OPENAI_COMPATIBLE_PROVIDERS: dict[str, ProviderSpec] = {
     "minimax":    ProviderSpec(base_url="https://api.minimax.io/v1", chat_class=MinimaxChatOpenAI),
     "minimax-cn": ProviderSpec(base_url="https://api.minimaxi.com/v1", chat_class=MinimaxChatOpenAI),
     "openrouter": ProviderSpec(base_url="https://openrouter.ai/api/v1"),
+    # OpenCode Go: an OpenAI-compatible subscription gateway in front of many
+    # vendors' models. Beyond the bearer token it wants a named client and a
+    # stable session id. The official endpoint is /inference/go/openai/v1; the
+    # older /zen/go/v1 alias also answers, and backend_url can pin either.
+    "opencode-go": ProviderSpec(base_url="https://opencode.ai/inference/go/openai/v1",
+                                chat_class=LocalCompatibleChatOpenAI,
+                                headers=_opencode_go_headers),
     "mistral":    ProviderSpec(base_url="https://api.mistral.ai/v1"),
     "kimi":       ProviderSpec(base_url="https://api.moonshot.ai/v1"),
     "groq":       ProviderSpec(base_url="https://api.groq.com/openai/v1"),
@@ -392,6 +437,14 @@ class OpenAIClient(BaseLLMClient):
             # only speaks Chat Completions, so keep Responses off there (#1024).
             if spec.use_responses_api and _is_native_openai_base_url(base_url):
                 llm_kwargs["use_responses_api"] = True
+
+            # Provider-required headers (client id, session id) travel with every
+            # request through the SDK's default_headers.
+            if spec.headers is not None:
+                llm_kwargs["default_headers"] = {
+                    **llm_kwargs.get("default_headers", {}),
+                    **spec.headers(),
+                }
         elif self.base_url:
             llm_kwargs["base_url"] = self.base_url
 

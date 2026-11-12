@@ -202,10 +202,37 @@ MODEL_OPTIONS: ProviderModeOptions = {
     # Generic OpenAI-compatible endpoint: the model is whatever the user's
     # server serves, so only "Custom model ID" is offered.
     "openai_compatible": _CUSTOM_ONLY,
+    # OpenRouter's catalog is fetched dynamically from its API; Azure serves the
+    # deployment names a user created. Neither is a fixed list, so both offer
+    # "Custom model ID" only — without an entry the CLI's model prompt raised
+    # KeyError when one of them was selected.
+    "openrouter": _CUSTOM_ONLY,
+    "azure": _CUSTOM_ONLY,
     # Hosted OpenAI-compatible providers that serve many (and frequently
     # changing) models — offer "Custom model ID" rather than a list that goes
     # stale. The endpoint + key are wired by the provider; the user picks the
     # model their account has access to.
+    # OpenCode Go: an OpenAI-compatible subscription gateway in front of many
+    # vendors' models. The live list is GET https://opencode.ai/inference/go/v1/models
+    # and changes as models are added, so these are a starting point plus Custom;
+    # any id the gateway serves is accepted.
+    "opencode-go": {
+        "quick": [
+            ("GLM-5.3-Flash - Fast and cost-efficient", "glm-5.3-flash"),
+            ("MiMo-V2.6-Flash - Fast", "mimo-v2.6-flash"),
+            ("DeepSeek V4.1 Flash", "deepseek-v4.1-flash"),
+            ("MiniMax M3.1 Flash", "minimax-m3.1-flash"),
+            ("Custom model ID", "custom"),
+        ],
+        "deep": [
+            ("GLM-5.3 - Flagship", "glm-5.3"),
+            ("DeepSeek V4 Pro", "deepseek-v4-pro"),
+            ("Kimi K3.1 Pro", "kimi-k3.1-pro"),
+            ("Qwen3.8 Max", "qwen3.8-max"),
+            ("Grok 4.7", "grok-4.7"),
+            ("Custom model ID", "custom"),
+        ],
+    },
     "mistral": {
         "quick": [
             ("Mistral Small 4 - Fast, 262K ctx", "mistral-small-2603"),

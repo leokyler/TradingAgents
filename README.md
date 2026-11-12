@@ -170,6 +170,7 @@ export ZHIPU_CN_API_KEY=...        # GLM via BigModel (China, open.bigmodel.cn)
 export MINIMAX_API_KEY=...         # MiniMax (global, api.minimax.io)
 export MINIMAX_CN_API_KEY=...      # MiniMax (China, api.minimaxi.com)
 export OPENROUTER_API_KEY=...      # OpenRouter
+export OPENCODE_GO_API_KEY=...     # OpenCode Go subscription (opencode.ai)
 export MISTRAL_API_KEY=...         # Mistral
 export MOONSHOT_API_KEY=...        # Kimi (Moonshot)
 export GROQ_API_KEY=...            # Groq
@@ -182,6 +183,8 @@ export TYPESAFE_API_KEY=...        # Jev social-post screening (optional)
 For Azure OpenAI, copy `.env.enterprise.example` to `.env.enterprise` and fill in your credentials. With Docker, put these keys in `.env` instead: the image does not include `.env` files.
 
 To run on your ChatGPT Plus or Pro plan instead of an API key, choose "Subscription" in the CLI's provider menu, or set `llm_provider: "chatgpt"`. Sign in once with `tradingagents login chatgpt`: it prints an address to open in your browser, which returns to this machine on `127.0.0.1`. When the browser runs on another machine, or TradingAgents runs in Docker (`docker compose run --rm tradingagents login chatgpt`), paste the address the browser ends up on. The sign-in is kept in `~/.tradingagents/chatgpt-auth.json`, and `tradingagents logout chatgpt` revokes it. Runs count toward your plan's usage limits, and the plan does not accept `temperature` or `max_tokens`.
+
+OpenCode Go is a subscription gateway that speaks the OpenAI API: choose "OpenCode Go" in the provider menu or set `llm_provider: "opencode-go"`, and set `OPENCODE_GO_API_KEY` from the Console's Settings → Service accounts. Its docs ask every client to do two things a plain OpenAI client does not: identify itself by name rather than as a generic SDK, and send a stable `x-opencode-session` id per conversation so requests route consistently and prompt caching can hit. The provider sends both, generating the session id once per process; set `OPENCODE_GO_SESSION_ID` to keep it across processes, which a scheduled job wants so separate runs share one conversation. The official base URL is `https://opencode.ai/inference/go/openai/v1`; `backend_url` can pin any other endpoint the gateway offers.
 
 For AWS Bedrock, install the extra with `pip install ".[bedrock]"`, set `llm_provider: "bedrock"`, configure AWS credentials (environment variables, `~/.aws/credentials`, or an IAM role) and `AWS_DEFAULT_REGION`, and use a Bedrock model ID, e.g. `us.anthropic.claude-opus-5-5`.
 
