@@ -46,6 +46,7 @@ Social media sentiment report: {sentiment_report}
 Latest world affairs news: {news_report}
 {fundamentals_label}: {fundamentals_report}
 ETF analyst report: {etf_report}
+If it names the industries the fund is long, attack that exposure: concentration, cyclicality, and how thin the disclosed slice is.
 Conversation history of the debate: {history}
 Last bull argument: {current_response}
 Use this information to deliver a compelling bear argument, refute the bull's claims, and engage in a dynamic debate that demonstrates the risks and weaknesses of investing in the {target_label}.

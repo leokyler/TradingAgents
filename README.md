@@ -234,8 +234,8 @@ An A-share ETF (Shanghai `.SS` fund codes `51xxxx`/`56xxxx`/`58xxxx`, Shenzhen `
 The ETF analyst reads Eastmoney's public fund endpoints (no key), which is where the fund-level facts live — Yahoo has no fund data for Chinese ETFs:
 
 - profile: price, shares outstanding, fund size, latest published NAV and the premium/discount it implies, turnover
-- disclosed holdings: the newest quarterly top holdings and the weight they cover
-- basket valuation: capital-weighted PE/PB/ROE over the disclosed constituents plus the industry weights they imply, with the coverage stated (a top-10 aggregate is not the index)
+- disclosed holdings: the newest quarterly top holdings and the weight they cover (bond and money-market funds fall back to their bond table; a commodity fund discloses neither and says so)
+- basket valuation: capital-weighted PE/PB/ROE over the disclosed constituents plus the industry weights they imply, with the coverage stated (a top-10 aggregate is not the index). The industry read is not a footnote: the ETF report is injected into the bull/bear and risk debates, so "what is this fund actually long" becomes an argument.
 
 ```bash
 tradingagents --ticker 510300.SS --date 2026-11-12 --analysts market,etf,news

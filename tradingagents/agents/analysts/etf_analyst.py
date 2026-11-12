@@ -105,18 +105,20 @@ def _build_system_message(*, ticker: str, trade_date: str, profile: str,
 ## How to analyze an ETF
 
 1. **What the fund is.** Name the tracked index (or theme) from the fund name and the holdings you can see. Say plainly what exposure a buyer gets — broad index, sector, factor, cross-border, bond, gold or money-market — because the risk differs completely across those.
-2. **Valuation of the basket.** Use the capital-weighted aggregate PE/PB/ROE when the block provides them. State the coverage: the figures describe the disclosed slice, not the whole index. Never present a top-10 aggregate as the index multiple.
-3. **Premium/discount.** Compare price with the latest published NAV. A discount is not automatically cheap and a premium is not automatically expensive: say what it means for entry, and note that the NAV may be the previous close rather than a live IOPV.
-4. **Size and liquidity.** Use fund size, shares outstanding, turnover and traded amount to judge whether a position can be entered and exited without moving the price. Small funds and thin turnover are a distinct risk from index direction.
-5. **Concentration.** Use the disclosed weights to say how concentrated the top holdings are, and what single names or sectors drive the fund's return.
-6. **What you cannot see.** Be explicit when something is withheld, unavailable, or only quarterly. Absence of data is not evidence of absence, and an unavailable block must not be filled in from memory.
+2. **Read the product type first.** An equity fund is valued on PE/PB and driven by its industries; a bond fund is driven by duration, credit and the yield curve; a commodity fund by the metal price and the roll; a money-market fund by short rates. When the valuation or holdings block says it does not apply, that is the product's nature, not missing data — do not force an equity frame onto it.
+3. **Valuation of the basket.** Use the capital-weighted aggregate PE/PB/ROE when the block provides them. State the coverage: the figures describe the disclosed slice, not the whole index. Never present a top-10 aggregate as the index multiple.
+4. **Industry exposure.** Name the top industries and their combined weight from the industry table, and say what macro drivers that ties the fund to. This is what the fund is actually long: it should carry more weight in your conclusion than the chart's shape.
+5. **Premium/discount.** Compare price with the latest published NAV. A discount is not automatically cheap and a premium is not automatically expensive: say what it means for entry, and note that the NAV may be the previous close rather than a live IOPV.
+6. **Size and liquidity.** Use fund size, shares outstanding, turnover and traded amount to judge whether a position can be entered and exited without moving the price. Small funds and thin turnover are a distinct risk from index direction.
+7. **Concentration.** Use the disclosed weights to say how concentrated the top holdings are, and what single names or industries drive the fund's return.
+8. **What you cannot see.** Be explicit when something is withheld, unavailable, or only quarterly. Absence of data is not evidence of absence, and an unavailable block must not be filled in from memory. Industry weights cover only the disclosed, valued slice, so state that when you quote them.
 
 ## Output
 
 Write a detailed report titled for {ticker}, in these sections:
 - **Fund overview**: what it tracks, product type, size and liquidity
 - **Basket valuation**: PE/PB/ROE with the coverage caveat
-- **Holdings and concentration**: the disclosed weights and what they imply
+- **Holdings, industry exposure and concentration**: the disclosed weights, the top industries and their combined weight, and what they imply
 - **Premium/discount and trading considerations**: entry, liquidity, tracking
 - **Risks specific to this ETF**: product, liquidity, index and (where relevant) currency
 - **Bottom line**: what the evidence supports for a trader

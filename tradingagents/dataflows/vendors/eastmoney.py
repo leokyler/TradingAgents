@@ -276,8 +276,13 @@ def get_etf_profile(ticker: str, as_of_date: str | None = None) -> str:
     return "\n".join(lines)
 
 
-def _holdings_rows(code: str, as_of_date: str | None = None, limit: int = 10) -> dict:
+def _holdings_rows(code: str, as_of_date: str | None = None, limit: int = 10,
+                   kind: str = "jjcc") -> dict:
     """Disclosed holdings: ``{report_date, quarter, rows: [{code,name,weight}]}``.
+
+    ``kind`` selects the disclosure: ``jjcc`` for stocks, ``zqcc`` for bonds.
+    A bond or money-market ETF has no stock table at all, so the two are tried
+    in that order by the caller.
 
     The page serves several quarters, each as an ``<h4>`` header (with its
     ``截止至`` date) followed by one table, newest first. A historical run asks
@@ -285,7 +290,7 @@ def _holdings_rows(code: str, as_of_date: str | None = None, limit: int = 10) ->
     disclosed quarter that had closed by the run date; if none had, the caller
     withholds rather than leaking a quarter published later.
     """
-    params = {"type": "jjcc", "code": code, "topline": str(limit)}
+    params = {"type": kind, "code": code, "topline": str(limit)}
     if as_of_date:
         year, month = _last_quarter_end(as_of_date)
         params.update({"year": str(year), "month": str(month)})
@@ -323,7 +328,8 @@ def _holdings_rows(code: str, as_of_date: str | None = None, limit: int = 10) ->
                  for c in re.findall(r"<td[^>]*>(.*?)</td>", raw_row, re.S)]
         if len(cells) < 4:
             continue
-        code_cell = next((c for c in cells[1:3] if re.fullmatch(r"\d{6}", c)), "")
+        pattern = r"\d{6}" if kind == "jjcc" else r"[0-9A-Za-z]{5,9}"
+        code_cell = next((c for c in cells[1:3] if re.fullmatch(pattern, c)), "")
         if not code_cell:
             continue
         weight_cell = next((c for c in cells if c.endswith("%")), "")
@@ -353,10 +359,23 @@ def _last_quarter_end(as_of_date: str) -> tuple[int, int]:
 
 
 def get_etf_holdings(ticker: str, as_of_date: str | None = None, limit: int = 10) -> str:
-    """The fund's disclosed top holdings and the weight they cover."""
+    """The fund's disclosed top holdings and the weight they cover.
+
+    Equity ETFs disclose stocks; bond and money-market ETFs disclose bonds
+    instead, and commodity ETFs (gold, etc.) disclose neither because they hold
+    the metal. The stock table is tried first, then the bond table, and a fund
+    with neither gets a note rather than an error: that is a fact about the
+    product, not a failure to fetch.
+    """
     canonical = normalize_symbol(ticker)
     code = _guard(ticker)
-    data = _holdings_rows(code, as_of_date, limit)
+
+    data = _holdings_rows(code, as_of_date, limit, "jjcc")
+    label = "holdings"
+    if not data["rows"] and not data.get("before_date"):
+        bonds = _holdings_rows(code, as_of_date, limit, "zqcc")
+        if bonds["rows"] or bonds.get("before_date"):
+            data, label = bonds, "bond holdings"
 
     report_date = data["report_date"]
     if data.get("before_date"):
@@ -373,11 +392,16 @@ def get_etf_holdings(ticker: str, as_of_date: str | None = None, limit: int = 10
             f"known then."
         )
     if not data["rows"]:
-        raise NoMarketDataError(ticker, canonical, "no disclosed holdings returned")
+        return (
+            f"# ETF holdings for {canonical}\n\n"
+            "This fund discloses no stock or bond holdings: a commodity or "
+            "money-market fund holds neither, so there is no basket to list. The "
+            "fund profile still carries price, size and premium."
+        )
 
     total = sum(row["weight"] for row in data["rows"])
     lines = [
-        f"# ETF holdings for {canonical} ({data['quarter']}, as of {report_date})",
+        f"# ETF {label} for {canonical} ({data['quarter']}, as of {report_date})",
         "",
         "| # | Code | Name | Weight of NAV |",
         "|---:|---|---|---:|",
@@ -386,7 +410,7 @@ def get_etf_holdings(ticker: str, as_of_date: str | None = None, limit: int = 10
         lines.append(f"| {rank} | {row['code']} | {row['name']} | {row['weight']:.2f}% |")
     lines += [
         "",
-        f"Top {len(data['rows'])} holdings cover {total:.2f}% of NAV. This is a "
+        f"Top {len(data['rows'])} {label} cover {total:.2f}% of NAV. This is a "
         "quarterly disclosure, not the live basket: weights drift with prices and "
         "with creations/redemptions.",
     ]
@@ -441,7 +465,15 @@ def get_etf_index_fundamentals(ticker: str, as_of_date: str | None = None, limit
             f"{report_date}, after {as_of_date}."
         )
     if not data["rows"]:
-        raise NoMarketDataError(ticker, canonical, "no disclosed holdings returned")
+        # A bond, commodity or money-market fund holds no equities, so a basket
+        # PE/PB does not exist for it. Say that, rather than reporting no data.
+        return (
+            f"# ETF index fundamentals for {canonical}\n\n"
+            "Basket valuation does not apply: this fund discloses no equity "
+            "holdings (a bond, commodity or money-market fund). Its return is "
+            "driven by the yield curve, the metal price or money-market rates, "
+            "not by a PE multiple."
+        )
 
     covered = []
     for row in data["rows"]:

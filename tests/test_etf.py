@@ -190,6 +190,56 @@ class TestEtfBasketValuation(unittest.TestCase):
         self.assertIn("withheld", out.lower())
 
 
+_BOND_PAGE = """var apidata={ content:"<div class='box'>
+<h4 class='t'>...2026年3季度债券投资明细...截止至：<font class='px12'>2026-09-30</font>...</h4>
+<table class='w782 comm tzxq t2'><tbody>
+<tr><td>1</td><td>019834</td><td>26国债08</td><td>26.72%</td><td>195,775.03</td></tr>
+<tr><td>2</td><td>260015</td><td>26附息国债15</td><td>14.92%</td><td>109,314.99</td></tr>
+</tbody></table>
+",rc:0};
+"""
+
+_EMPTY_PAGE = 'var apidata={ content:"",rc:0};'
+
+
+@pytest.mark.unit
+class TestFundTypeDisclosure(unittest.TestCase):
+    def _holdings(self, ticker):
+        def fake(url, *, params=None, referer=None):
+            if eastmoney._HOLDINGS_URL not in url:
+                raise AssertionError(url)
+            if params.get("code") == "518880":
+                return _EMPTY_PAGE
+            return _BOND_PAGE if params.get("type") == "zqcc" else _EMPTY_PAGE
+
+        original = eastmoney._get
+        eastmoney._get = fake
+        try:
+            return eastmoney.get_etf_holdings(ticker, "2026-11-12")
+        finally:
+            eastmoney._get = original
+
+    def test_bond_fund_falls_back_to_bond_holdings(self):
+        out = self._holdings("511010.SS")
+        self.assertIn("bond holdings", out)
+        self.assertIn("26国债08", out)
+        self.assertIn("26.72%", out)
+
+    def test_commodity_fund_says_it_discloses_no_basket(self):
+        out = self._holdings("518880.SS")
+        self.assertIn("discloses no stock or bond holdings", out)
+
+    def test_basket_valuation_does_not_apply_without_equity_holdings(self):
+        original = eastmoney._get
+        eastmoney._get = _fake_get({eastmoney._HOLDINGS_URL: _EMPTY_PAGE})
+        try:
+            out = eastmoney.get_etf_index_fundamentals("511010.SS", "2026-11-12")
+        finally:
+            eastmoney._get = original
+        self.assertIn("does not apply", out)
+        self.assertNotIn("Aggregate PE", out)
+
+
 @pytest.mark.unit
 class TestEtfInstrumentContext(unittest.TestCase):
     def test_context_says_fund_not_company(self):
