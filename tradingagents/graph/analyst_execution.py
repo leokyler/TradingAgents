@@ -43,6 +43,14 @@ ANALYST_NODE_SPECS: dict[str, AnalystNodeSpec] = {
         report_key="fundamentals_report",
         tools=fundamentals_analyst.TOOLS,
     ),
+    "etf": AnalystNodeSpec(
+        # Fund-level data (profile, holdings, basket valuation) is fetched
+        # before the model is called, like the sentiment analyst, so this node
+        # is offered no tools.
+        key="etf",
+        agent_node="ETF Analyst",
+        report_key="etf_report",
+    ),
 }
 
 

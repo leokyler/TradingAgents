@@ -19,14 +19,14 @@ def create_bear_researcher(llm):
         sentiment_report = report_or_absent(state["sentiment_report"], "sentiment")
         news_report = report_or_absent(state["news_report"], "news")
         fundamentals_report = report_or_absent(state["fundamentals_report"], "fundamentals")
+        etf_report = report_or_absent(state.get("etf_report", ""), "ETF")
         instrument_context = get_instrument_context_from_state(state)
         asset_type = state.get("asset_type", "stock")
-        target_label = "stock" if asset_type == "stock" else "asset"
-        fundamentals_label = (
-            "Company fundamentals report"
-            if asset_type == "stock"
-            else "Asset fundamentals report (may be unavailable for crypto)"
-        )
+        target_label = {"stock": "stock", "etf": "fund"}.get(asset_type, "asset")
+        fundamentals_label = {
+            "stock": "Company fundamentals report",
+            "etf": "Company fundamentals report (not applicable: a fund files none)",
+        }.get(asset_type, "Asset fundamentals report (may be unavailable for crypto)")
 
         prompt = f"""You are a Bear Analyst making the case against investing in the {target_label}. Your goal is to present a well-reasoned argument emphasizing risks, challenges, and negative indicators. Leverage the provided research and data to highlight potential downsides and counter bullish arguments effectively.
 
@@ -45,6 +45,7 @@ Market research report: {market_research_report}
 Social media sentiment report: {sentiment_report}
 Latest world affairs news: {news_report}
 {fundamentals_label}: {fundamentals_report}
+ETF analyst report: {etf_report}
 Conversation history of the debate: {history}
 Last bull argument: {current_response}
 Use this information to deliver a compelling bear argument, refute the bull's claims, and engage in a dynamic debate that demonstrates the risks and weaknesses of investing in the {target_label}.

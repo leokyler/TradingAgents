@@ -11,6 +11,7 @@ from rich.markup import escape
 
 from cli.display import console
 from cli.models import AnalystType, AssetType
+from tradingagents.dataflows.etf import is_a_share_etf
 from tradingagents.dataflows.symbols import safe_ticker_component
 from tradingagents.llm_clients.api_key_env import get_api_key_env
 from tradingagents.llm_clients.model_catalog import get_model_options
@@ -20,6 +21,7 @@ TICKER_INPUT_EXAMPLES = "SPY, 0700.HK, BTC-USD"
 
 ANALYST_CHOICES = [
     ("Market Analyst", AnalystType.MARKET),
+    ("ETF Analyst", AnalystType.ETF),
     ("Sentiment Analyst", AnalystType.SOCIAL),
     ("News Analyst", AnalystType.NEWS),
     ("Fundamentals Analyst", AnalystType.FUNDAMENTALS),
@@ -106,10 +108,12 @@ def parse_analysts(value: str, asset_type: AssetType) -> list[AnalystType]:
         raise ValueError("name at least one analyst")
     known = {a.value: a for a in AnalystType}
     unknown = [n for n in names if n not in known]
-    if unknown:
-        choices = ", ".join("sentiment" if name == "social" else name for name in known)
-        raise ValueError(f"unknown analyst {', '.join(unknown)}; choose from {choices}")
+    # Offer the analysts this asset type can actually use, so a stock run is not
+    # told that "etf" is a choice and an ETF run is not told about fundamentals.
     available = filter_analysts_for_asset_type(list(known.values()), asset_type)
+    if unknown:
+        choices = ", ".join("sentiment" if a.value == "social" else a.value for a in available)
+        raise ValueError(f"unknown analyst {', '.join(unknown)}; choose from {choices}")
     unavailable = [n for n in names if known[n] not in available]
     if unavailable:
         raise ValueError(f"{', '.join(unavailable)} is not available for {asset_type.value}")
@@ -138,19 +142,33 @@ def detect_asset_type(ticker: str) -> AssetType:
     canonical = normalize_ticker_symbol(ticker)
     if canonical.endswith(CRYPTO_SUFFIXES):
         return AssetType.CRYPTO
+    if is_a_share_etf(canonical):
+        return AssetType.ETF
     return AssetType.STOCK
 
 
 def filter_analysts_for_asset_type(
     analysts: list[AnalystType], asset_type: AssetType
 ) -> list[AnalystType]:
-    if asset_type != AssetType.CRYPTO:
-        return analysts
-    return [
-        analyst
-        for analyst in analysts
-        if analyst != AnalystType.FUNDAMENTALS
-    ]
+    """The analysts an asset type can use.
+
+    A fund has no company filings and no US retail cashtags, so an ETF run trades
+    both for the ETF analyst; a stock run never offers the ETF analyst, and a
+    crypto run offers neither.
+    """
+    if asset_type == AssetType.ETF:
+        return [
+            analyst
+            for analyst in analysts
+            if analyst not in (AnalystType.FUNDAMENTALS, AnalystType.SOCIAL)
+        ]
+    if asset_type == AssetType.CRYPTO:
+        return [
+            analyst
+            for analyst in analysts
+            if analyst not in (AnalystType.FUNDAMENTALS, AnalystType.ETF)
+        ]
+    return [analyst for analyst in analysts if analyst != AnalystType.ETF]
 
 
 def _matching_choice(options, default):

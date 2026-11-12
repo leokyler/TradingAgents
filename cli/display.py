@@ -35,6 +35,7 @@ class MessageBuffer:
     # Analyst name mapping
     ANALYST_MAPPING = {
         "market": "Market Analyst",
+        "etf": "ETF Analyst",
         "social": "Sentiment Analyst",
         "news": "News Analyst",
         "fundamentals": "Fundamentals Analyst",
@@ -45,6 +46,7 @@ class MessageBuffer:
     # finalizing_agent: which agent must be "completed" for this report to count as done
     REPORT_SECTIONS = {
         "market_report": ("market", "Market Analyst"),
+        "etf_report": ("etf", "ETF Analyst"),
         "sentiment_report": ("social", "Sentiment Analyst"),
         "news_report": ("news", "News Analyst"),
         "fundamentals_report": ("fundamentals", "Fundamentals Analyst"),
@@ -385,6 +387,8 @@ def display_complete_report(final_state):
     analysts = []
     if final_state.get("market_report"):
         analysts.append(("Market Analyst", final_state["market_report"]))
+    if final_state.get("etf_report"):
+        analysts.append(("ETF Analyst", final_state["etf_report"]))
     if final_state.get("sentiment_report"):
         analysts.append(("Sentiment Analyst", final_state["sentiment_report"]))
     if final_state.get("news_report"):
@@ -445,10 +449,11 @@ def update_research_team_status(status):
 
 
 # Ordered list of analysts for status transitions
-ANALYST_ORDER = ["market", "social", "news", "fundamentals"]
+ANALYST_ORDER = ["market", "etf", "social", "news", "fundamentals"]
 
 ANALYST_AGENT_NAMES = {
     "market": "Market Analyst",
+    "etf": "ETF Analyst",
     "social": "Sentiment Analyst",
     "news": "News Analyst",
     "fundamentals": "Fundamentals Analyst",
@@ -456,6 +461,7 @@ ANALYST_AGENT_NAMES = {
 
 ANALYST_REPORT_MAP = {
     "market": "market_report",
+    "etf": "etf_report",
     "social": "sentiment_report",
     "news": "news_report",
     "fundamentals": "fundamentals_report",

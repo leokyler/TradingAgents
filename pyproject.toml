@@ -10,6 +10,11 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "cryptography>=42.0",
+    # Browser TLS fingerprint for the Eastmoney ETF vendor: its edge closes the
+    # connection for non-browser clients. The vendor still works through
+    # requests where the network does not fingerprint, so this is a runtime
+    # fallback rather than a hard requirement of the code path.
+    "curl-cffi>=0.11",
     "langchain-core>=1.6.5",
     "langchain-anthropic>=1.7.4",
     "langchain-google-genai>=4.4.0",

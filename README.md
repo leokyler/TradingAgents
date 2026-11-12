@@ -227,6 +227,22 @@ TradingAgents works with any market Yahoo Finance covers, using the exchange-suf
 - China A-shares: Shanghai `.SS`, Shenzhen `.SZ` (e.g. `600519.SS` for Kweichow Moutai)
 - Crypto: `BTC-USD`, `ETH-USD`
 
+### Exchange-traded funds
+
+An A-share ETF (Shanghai `.SS` fund codes `51xxxx`/`56xxxx`/`58xxxx`, Shenzhen `.SZ` `159xxx`) is detected automatically: the run switches to `asset_type="etf"` and the default analyst team becomes **Market + ETF + News**. The fundamentals and sentiment analysts are dropped there, because a fund files no company statements and has no US retail cashtag stream.
+
+The ETF analyst reads Eastmoney's public fund endpoints (no key), which is where the fund-level facts live — Yahoo has no fund data for Chinese ETFs:
+
+- profile: price, shares outstanding, fund size, latest published NAV and the premium/discount it implies, turnover
+- disclosed holdings: the newest quarterly top holdings and the weight they cover
+- basket valuation: capital-weighted PE/PB/ROE over the disclosed constituents, with the coverage stated (a top-10 aggregate is not the index)
+
+```bash
+tradingagents --ticker 510300.SS --date 2026-11-12 --analysts market,etf,news
+```
+
+Point-in-time rules still hold: a historical run gets the holdings quarter that had closed by its date, and the live profile and present-day valuation multiples are withheld rather than shown. The ETF path covers A-share listed funds only; a US ETF (e.g. `SPY`) stays on the stock pipeline and uses Yahoo's fund data through the market/news analysts.
+
 <p align="center">
   <img src="assets/cli/cli_init.png" width="100%" style="display: inline-block; margin: 0 2%;">
 </p>

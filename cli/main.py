@@ -113,7 +113,7 @@ def backtest(
     analysts: str = typer.Option(
         None, "--analysts", help="Comma-separated analysts to run: market, sentiment, news, fundamentals; omit for all the asset type allows"
     ),
-    asset_type: str = typer.Option("stock", "--asset-type", help="stock or crypto"),
+    asset_type: str = typer.Option("stock", "--asset-type", help="stock, etf or crypto"),
     portfolio: str = typer.Option(
         None, "--portfolio", help="JSON file with holdings and cash, held constant across the grid"
     ),

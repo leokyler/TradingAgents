@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from tradingagents.dataflows.date_window import is_historical
+from tradingagents.dataflows.symbols import normalize_symbol
 from tradingagents.dataflows.vendors.yahoo.fundamentals import get_company_profile
 
 logger = logging.getLogger(__name__)
@@ -124,7 +125,8 @@ def build_instrument_context(
     on the analysis date.
     """
     is_crypto = asset_type == "crypto"
-    instrument_label = "asset" if is_crypto else "instrument"
+    is_etf = asset_type == "etf"
+    instrument_label = "fund" if is_etf else ("asset" if is_crypto else "instrument")
     context = (
         f"The {instrument_label} to analyze is `{ticker}`. "
         "The tools serve this instrument; refer to it by this exact ticker in every report and recommendation, "
@@ -133,7 +135,7 @@ def build_instrument_context(
 
     identity = identity or {}
     name = identity.get("company_name") or identity.get("name")
-    label = "Name" if is_crypto else "Company"
+    label = "Fund" if is_etf else ("Name" if is_crypto else "Company")
     details = []
     if is_historical(trade_date):
         if name:
@@ -165,6 +167,22 @@ def build_instrument_context(
         context += (
             " Treat it as a crypto asset rather than a company, and do not "
             "assume company fundamentals are available."
+        )
+    if is_etf:
+        context += (
+            " This instrument is an exchange-traded fund: a basket of securities held "
+            "in a fund, not a company. It files no company financial statements and has "
+            "no insiders or earnings call. Analyze the tracked index, the valuation of "
+            "the basket, the fund's size and liquidity, and the premium or discount to "
+            "NAV; do not look for company fundamentals that do not exist."
+        )
+    canonical = normalize_symbol(str(ticker))
+    if canonical.endswith((".SS", ".SZ")):
+        context += (
+            " A-share market rules apply: the session is 09:30-11:30 and 13:00-15:00 "
+            "China time, equity ETFs settle T+1 (cross-border, bond, gold and "
+            "money-market ETFs allow same-day round trips), and daily price limits "
+            "cap moves. Size entries, stops and holding periods with these in mind."
         )
     return context
 

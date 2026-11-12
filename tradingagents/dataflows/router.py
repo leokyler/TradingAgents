@@ -17,6 +17,11 @@ from tradingagents.dataflows.vendors.alpha_vantage import (
     get_news as get_alpha_vantage_news,
     get_stock as get_alpha_vantage_stock,
 )
+from tradingagents.dataflows.vendors.eastmoney import (
+    get_etf_holdings as get_eastmoney_etf_holdings,
+    get_etf_index_fundamentals as get_eastmoney_etf_index_fundamentals,
+    get_etf_profile as get_eastmoney_etf_profile,
+)
 from tradingagents.dataflows.vendors.fred import get_macro_data as get_fred_macro_data
 from tradingagents.dataflows.vendors.polymarket import (
     get_prediction_markets as get_polymarket_prediction_markets,
@@ -83,6 +88,14 @@ TOOLS_CATEGORIES = {
         "tools": [
             "get_prediction_markets",
         ]
+    },
+    "etf_data": {
+        "description": "Exchange-traded fund profile, disclosed holdings and basket valuation",
+        "tools": [
+            "get_etf_profile",
+            "get_etf_holdings",
+            "get_etf_index_fundamentals",
+        ]
     }
 }
 
@@ -145,6 +158,16 @@ VENDOR_METHODS = {
     # prediction_markets
     "get_prediction_markets": {
         "polymarket": get_polymarket_prediction_markets,
+    },
+    # etf_data
+    "get_etf_profile": {
+        "eastmoney": get_eastmoney_etf_profile,
+    },
+    "get_etf_holdings": {
+        "eastmoney": get_eastmoney_etf_holdings,
+    },
+    "get_etf_index_fundamentals": {
+        "eastmoney": get_eastmoney_etf_index_fundamentals,
     },
 }
 

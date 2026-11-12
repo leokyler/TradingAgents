@@ -53,6 +53,7 @@ class AgentState(MessagesState):
     sentiment_report: Annotated[str, "Report from the Sentiment Analyst"]
     news_report: Annotated[str, "Report from the News Analyst on company and world news"]
     fundamentals_report: Annotated[str, "Report from the Fundamentals Analyst"]
+    etf_report: Annotated[str, "Report from the ETF Analyst (fund profile, holdings, basket valuation)"]
 
     # researcher team discussion step
     investment_debate_state: Annotated[

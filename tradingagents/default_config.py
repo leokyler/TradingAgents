@@ -164,6 +164,9 @@ def build_default_config() -> dict:
             "news_data": "yfinance",             # Options: alpha_vantage, yfinance
             "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)
             "prediction_markets": "polymarket",  # Options: polymarket (keyless)
+            # Fund-level data for A-share ETFs (profile, holdings, basket
+            # valuation). Yahoo has no fund data for Chinese ETFs.
+            "etf_data": "eastmoney",             # Options: eastmoney (keyless)
         },
         # Tool-level configuration (takes precedence over category-level)
         "tool_vendors": {
