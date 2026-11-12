@@ -158,10 +158,12 @@ class TestEtfBasketValuation(unittest.TestCase):
                 return _HOLDINGS_PAGE
             if params and params.get("secid") == "1.600519":
                 return json.dumps({"data": {"f57": "600519", "f58": "贵州茅台",
-                                            "f116": 1000.0, "f162": 10.0, "f167": 2.0}})
+                                            "f116": 1000.0, "f162": 10.0, "f167": 2.0,
+                                            "f127": "白酒Ⅱ"}})
             if params and params.get("secid") == "0.300750":
                 return json.dumps({"data": {"f57": "300750", "f58": "宁德时代",
-                                            "f116": 1000.0, "f162": 20.0, "f167": 4.0}})
+                                            "f116": 1000.0, "f162": 20.0, "f167": 4.0,
+                                            "f127": "电池"}})
             raise AssertionError(f"unexpected {url} {params}")
 
         original = eastmoney._get
@@ -177,6 +179,11 @@ class TestEtfBasketValuation(unittest.TestCase):
         # ROE = PB / PE = 0.2 -> 20.00%
         self.assertIn("20.00%", out)
         self.assertIn("6.12%", out)  # 3.09 + 3.03 coverage
+        # Industry exposure is aggregated over the covered constituents: each
+        # name is its own sub-industry here, so the weights pass straight through.
+        self.assertIn("### Industry exposure", out)
+        self.assertIn("白酒Ⅱ", out)
+        self.assertIn("电池", out)
 
     def test_historical_run_gets_no_present_day_valuation(self):
         out = eastmoney.get_etf_index_fundamentals("510300.SS", "2026-06-30")

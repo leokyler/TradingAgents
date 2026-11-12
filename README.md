@@ -235,13 +235,15 @@ The ETF analyst reads Eastmoney's public fund endpoints (no key), which is where
 
 - profile: price, shares outstanding, fund size, latest published NAV and the premium/discount it implies, turnover
 - disclosed holdings: the newest quarterly top holdings and the weight they cover
-- basket valuation: capital-weighted PE/PB/ROE over the disclosed constituents, with the coverage stated (a top-10 aggregate is not the index)
+- basket valuation: capital-weighted PE/PB/ROE over the disclosed constituents plus the industry weights they imply, with the coverage stated (a top-10 aggregate is not the index)
 
 ```bash
 tradingagents --ticker 510300.SS --date 2026-11-12 --analysts market,etf,news
 ```
 
 Point-in-time rules still hold: a historical run gets the holdings quarter that had closed by its date, and the live profile and present-day valuation multiples are withheld rather than shown. The ETF path covers A-share listed funds only; a US ETF (e.g. `SPY`) stays on the stock pipeline and uses Yahoo's fund data through the market/news analysts.
+
+Independently of the asset type, a run that cannot read a price series for its instrument is published as **REVIEW** rather than Buy/Hold/Sell: the debate always produces an opinion, and the evidence gate refuses to present one that no price data supports. Set `evidence_gate: false` (or `TRADINGAGENTS_EVIDENCE_GATE=0`) to turn it off.
 
 <p align="center">
   <img src="assets/cli/cli_init.png" width="100%" style="display: inline-block; margin: 0 2%;">

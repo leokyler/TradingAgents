@@ -54,9 +54,9 @@ _HOLDINGS_REFERER = "https://fundf10.eastmoney.com/ccmx_{code}.html"
 # decimal (otherwise they arrive as integers scaled by 10**f59).
 _QUOTE_FIELDS = "f43,f44,f45,f46,f47,f48,f57,f58,f59,f60,f84,f116,f168,f169,f170"
 
-# A constituent quote only needs valuation: f116 market cap, f162 PE (TTM),
-# f167 PB, f58 name.
-_CONSTITUENT_FIELDS = "f57,f58,f116,f162,f167"
+# A constituent quote only needs valuation and the industry: f116 market cap,
+# f162 PE (TTM), f167 PB, f127 sub-industry name, f58 name.
+_CONSTITUENT_FIELDS = "f57,f58,f116,f162,f167,f127"
 
 _TIMEOUT = 10.0
 
@@ -405,7 +405,8 @@ def _constituent_valuation(code: str) -> dict | None:
     name = quote.get("f58") or code
     if not cap or cap <= 0:
         return None
-    return {"code": code, "name": name, "cap": cap, "pe": pe, "pb": pb}
+    return {"code": code, "name": name, "cap": cap, "pe": pe, "pb": pb,
+            "industry": quote.get("f127") or ""}
 
 
 def get_etf_index_fundamentals(ticker: str, as_of_date: str | None = None, limit: int = 10) -> str:
@@ -465,14 +466,15 @@ def get_etf_index_fundamentals(ticker: str, as_of_date: str | None = None, limit
     lines = [
         f"# ETF index fundamentals for {canonical} (holdings as of {report_date})",
         "",
-        "| Code | Name | Weight | Market cap (亿) | PE | PB |",
-        "|---|---|---:|---:|---:|---:|",
+        "| Code | Name | Industry | Weight | Market cap (亿) | PE | PB |",
+        "|---|---|---|---:|---:|---:|---:|",
     ]
     for item in covered:
         pe = f"{item['pe']:.1f}" if item["pe"] and item["pe"] > 0 else "n/a"
         pb = f"{item['pb']:.2f}" if item["pb"] and item["pb"] > 0 else "n/a"
+        industry = item["industry"] or "n/a"
         lines.append(
-            f"| {item['code']} | {item['name']} | {item['weight']:.2f}% | "
+            f"| {item['code']} | {item['name']} | {industry} | {item['weight']:.2f}% | "
             f"{item['cap'] / 1e8:,.0f} | {pe} | {pb} |"
         )
 
@@ -483,6 +485,20 @@ def get_etf_index_fundamentals(ticker: str, as_of_date: str | None = None, limit
         lines.append(f"- **Aggregate PB**: {index_pb:.2f}")
     if index_roe:
         lines.append(f"- **Implied ROE (PB/PE)**: {index_roe * 100:.2f}%")
+    sectors: dict[str, float] = {}
+    for item in covered:
+        industry = item["industry"] or "Unknown"
+        sectors[industry] = sectors.get(industry, 0.0) + item["weight"]
+    if sectors:
+        lines += ["", "### Industry exposure (covered constituents)", "",
+                  "| Industry | Weight of NAV | Share of covered |", "|---|---:|---:|"]
+        for industry, weight in sorted(sectors.items(), key=lambda kv: kv[1], reverse=True):
+            share = weight / covered_weight * 100 if covered_weight else 0.0
+            lines.append(f"| {industry} | {weight:.2f}% | {share:.1f}% |")
+        lines.append("")
+        lines.append("Industry labels are the vendor's own sub-industry names; the "
+                     "weights cover only the disclosed, valued slice.")
+
     lines += [
         "",
         f"Coverage: the top {len(data['rows'])} disclosed holdings are "

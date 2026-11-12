@@ -9,6 +9,7 @@ from typing import Any
 
 import tradingagents
 from tradingagents.agents.context import build_instrument_context, resolve_instrument_identity
+from tradingagents.agents.evidence import gate_signal
 from tradingagents.agents.rating import run_rating
 from tradingagents.dataflows.config import run_config, run_config_context, set_config
 from tradingagents.dataflows.date_window import get_current_date, is_historical
@@ -397,6 +398,16 @@ class TradingAgentsGraph:
         else:
             final_state = self.graph.invoke(graph_input, **args)
 
+        # A run that could not obtain a price series is not a tradeable call: the
+        # gate rewrites the rating to REVIEW before the decision is recorded, so
+        # the memory log, the report and the returned signal all agree.
+        signal, gate_note = gate_signal(final_state, run_rating(final_state), self.config)
+        if gate_note:
+            final_state["final_rating"] = signal
+            final_state["final_trade_decision"] = (
+                (final_state.get("final_trade_decision") or "") + gate_note
+            )
+
         self.record_decision(company_name, trade_date, final_state)
 
         # Clear checkpoint on successful completion to avoid stale state.
@@ -444,6 +455,7 @@ class TradingAgentsGraph:
             "sentiment_report": final_state["sentiment_report"],
             "news_report": final_state["news_report"],
             "fundamentals_report": final_state["fundamentals_report"],
+            "etf_report": final_state.get("etf_report", ""),
             "investment_debate_state": {
                 "bull_history": final_state["investment_debate_state"]["bull_history"],
                 "bear_history": final_state["investment_debate_state"]["bear_history"],
