@@ -117,3 +117,47 @@ class TestPricesKeepTheirDigits:
         monkeypatch.setattr(market.yf, "Ticker", _Ticker)
         text = market.get_YFin_data_online("SHIB-USD", "2026-05-11", "2026-05-15")
         assert "0.00000503" in text and ",0.0," not in text
+
+
+@pytest.mark.unit
+class TestRoutedFallback:
+    """When Yahoo cannot serve the bars, the tool rebuilds the snapshot from the
+    configured price vendor instead of telling the analyst it has no data."""
+
+    def _csv_text(self) -> str:
+        frame = _sample_ohlcv().tail(3)
+        return "# Stock data for 515070.SS\n# Total records: 3\n\n" + frame.to_csv(index=False)
+
+    def test_snapshot_falls_back_to_the_configured_price_vendor(self, monkeypatch):
+        from tradingagents.agents import tools
+        from tradingagents.dataflows.errors import VendorUnavailableError
+
+        def boom(*a, **k):
+            raise VendorUnavailableError("Yahoo rate limited")
+
+        monkeypatch.setattr(tools, "build_verified_market_snapshot", boom)
+        monkeypatch.setattr(tools, "route_to_vendor", lambda *a, **k: self._csv_text())
+
+        out = tools.get_verified_market_snapshot.invoke(
+            {"symbol": "515070.SS", "curr_date": "2026-05-20"}
+        )
+        assert out.startswith("## Verified market data snapshot for 515070.SS")
+        assert "### Latest verified OHLCV row" in out
+        assert "use of this snapshot" not in out.lower()
+
+    def test_failed_fallback_keeps_the_unavailable_sentinel(self, monkeypatch):
+        from tradingagents.agents import tools
+        from tradingagents.dataflows.errors import VendorUnavailableError
+
+        def boom(*a, **k):
+            raise VendorUnavailableError("Yahoo rate limited")
+
+        monkeypatch.setattr(tools, "build_verified_market_snapshot", boom)
+        monkeypatch.setattr(
+            tools, "route_to_vendor", lambda *a, **k: "DATA_UNAVAILABLE: no vendor"
+        )
+
+        out = tools.get_verified_market_snapshot.invoke(
+            {"symbol": "515070.SS", "curr_date": "2026-05-20"}
+        )
+        assert out.startswith("DATA_UNAVAILABLE")

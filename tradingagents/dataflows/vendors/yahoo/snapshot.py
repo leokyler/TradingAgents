@@ -71,10 +71,24 @@ def build_verified_market_snapshot(
     indicators: Iterable[str] | None = None,
 ) -> str:
     """Render a ground-truth snapshot: latest OHLCV row, indicators, recent closes."""
-    # `df` keeps the original capitalized OHLCV columns (Open/High/Low/Close/
-    # Volume); stockstats `wrap()` lowercases columns and adds indicator
-    # columns, so read raw prices from `df` and indicators from `stock_df`.
-    df = _verified_rows(symbol, as_of_date)
+    return render_verified_snapshot(
+        _verified_rows(symbol, as_of_date), symbol, as_of_date, look_back_days, indicators
+    )
+
+
+def render_verified_snapshot(
+    df: pd.DataFrame,
+    symbol: str,
+    as_of_date: str,
+    look_back_days: int = 30,
+    indicators: Iterable[str] | None = None,
+) -> str:
+    """Render the snapshot from an OHLCV frame any price vendor served.
+
+    `df` keeps the original capitalized OHLCV columns (Open/High/Low/Close/
+    Volume); stockstats `wrap()` lowercases columns and adds indicator columns,
+    so read raw prices from `df` and indicators from `stock_df`.
+    """
     stock_df = wrap(df.copy())
 
     selected = tuple(indicators or DEFAULT_SNAPSHOT_INDICATORS)
