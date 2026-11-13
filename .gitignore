@@ -221,3 +221,10 @@ __marimo__/
 # Enterprise env file (secrets) and generated run reports
 .env.enterprise
 reports/
+
+# Local benchmark harness output (logs, runs, cache) — reproducible, not source
+.bench/logs/
+.bench/results/
+.bench/cache/
+.bench/memory/
+.bench/uv-cache/
