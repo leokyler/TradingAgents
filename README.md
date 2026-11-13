@@ -236,6 +236,8 @@ TradingAgents works with any market Yahoo Finance covers, using the exchange-suf
 
 An A-share ETF (Shanghai `.SS` fund codes `51xxxx`/`56xxxx`/`58xxxx`, Shenzhen `.SZ` `159xxx`) is detected automatically: the run switches to `asset_type="etf"` and the default analyst team becomes **Market + ETF + News**. The fundamentals and sentiment analysts are dropped there, because a fund files no company statements and has no US retail cashtag stream.
 
+For A-share price data, point the price categories at the keyless `cn_market` vendor: `TRADINGAGENTS_DATA_VENDORS='{"core_stock_apis": "cn_market,yfinance", "technical_indicators": "cn_market,yfinance"}'`. It serves daily bars and indicators from public China endpoints (Eastmoney, then Tencent, then Sina) and falls through to Yahoo for anything else, so a blocked or throttled Yahoo does not cost an A-share run its prices.
+
 The ETF analyst reads Eastmoney's public fund endpoints (no key), which is where the fund-level facts live — Yahoo has no fund data for Chinese ETFs:
 
 - profile: price, shares outstanding, fund size, latest published NAV and the premium/discount it implies, turnover

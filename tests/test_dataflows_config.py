@@ -201,3 +201,43 @@ def test_a_run_config_missing_a_newer_key_still_reads_the_default():
     del config["news_article_limit"]
     with run_config(config):
         assert get_config()["news_article_limit"] == default_config.DEFAULT_CONFIG["news_article_limit"]
+
+
+# --- vendor chains from the environment ---------------------------------------
+
+@pytest.mark.unit
+def test_data_vendor_env_override_merges_per_category(monkeypatch):
+    monkeypatch.setenv(
+        "TRADINGAGENTS_DATA_VENDORS",
+        '{"core_stock_apis": "cn_market,yfinance"}',
+    )
+    fresh = default_config.build_default_config()
+    assert fresh["data_vendors"]["core_stock_apis"] == "cn_market,yfinance"
+    # Naming one chain does not drop the others.
+    assert fresh["data_vendors"]["technical_indicators"] == "yfinance"
+    assert fresh["data_vendors"]["fundamental_data"] == "sec_edgar,yfinance"
+
+
+@pytest.mark.unit
+def test_data_vendor_env_override_replaces_an_existing_chain(monkeypatch):
+    monkeypatch.setenv(
+        "TRADINGAGENTS_DATA_VENDORS",
+        '{"technical_indicators": "cn_market"}',
+    )
+    fresh = default_config.build_default_config()
+    assert fresh["data_vendors"]["technical_indicators"] == "cn_market"
+    assert fresh["data_vendors"]["core_stock_apis"] == "yfinance"
+
+
+@pytest.mark.unit
+def test_data_vendor_env_override_rejects_bad_json(monkeypatch):
+    monkeypatch.setenv("TRADINGAGENTS_DATA_VENDORS", "{nope")
+    with pytest.raises(ValueError, match="TRADINGAGENTS_DATA_VENDORS"):
+        default_config.build_default_config()
+
+
+@pytest.mark.unit
+def test_data_vendor_env_override_rejects_non_string_values(monkeypatch):
+    monkeypatch.setenv("TRADINGAGENTS_DATA_VENDORS", '{"core_stock_apis": 1}')
+    with pytest.raises(ValueError, match="TRADINGAGENTS_DATA_VENDORS"):
+        default_config.build_default_config()

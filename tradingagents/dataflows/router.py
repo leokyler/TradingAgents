@@ -22,6 +22,10 @@ from tradingagents.dataflows.vendors.eastmoney import (
     get_etf_index_fundamentals as get_eastmoney_etf_index_fundamentals,
     get_etf_profile as get_eastmoney_etf_profile,
 )
+from tradingagents.dataflows.vendors.cn_market import (
+    get_indicators as get_cn_market_indicators,
+    get_stock_data as get_cn_market_stock,
+)
 from tradingagents.dataflows.vendors.fred import get_macro_data as get_fred_macro_data
 from tradingagents.dataflows.vendors.polymarket import (
     get_prediction_markets as get_polymarket_prediction_markets,
@@ -112,11 +116,13 @@ VENDOR_METHODS = {
     "get_stock_data": {
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
+        "cn_market": get_cn_market_stock,
     },
     # technical_indicators
     "get_indicators": {
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
+        "cn_market": get_cn_market_indicators,
     },
     # fundamental_data
     "get_fundamentals": {

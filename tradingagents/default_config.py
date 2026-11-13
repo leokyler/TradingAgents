@@ -1,3 +1,4 @@
+import json
 import os
 
 _TRADINGAGENTS_HOME = os.path.join(os.path.expanduser("~"), ".tradingagents")
@@ -64,8 +65,31 @@ def _coerce(value: str, reference):
     return value
 
 
+def _parse_data_vendors(raw: str) -> dict:
+    """A JSON object of category -> ordered vendor chain, e.g. {"core_stock_apis": "cn_market,yfinance"}."""
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            'expected a JSON object like {"core_stock_apis": "cn_market,yfinance"}'
+        ) from exc
+    if not isinstance(value, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in value.items()
+    ):
+        raise ValueError("expected a JSON object of category -> vendor chain strings")
+    return value
+
+
 def _apply_env_overrides(config: dict) -> dict:
     """Apply TRADINGAGENTS_* env vars to the config dict in-place."""
+    vendors = os.environ.get("TRADINGAGENTS_DATA_VENDORS")
+    if vendors:
+        try:
+            overrides = _parse_data_vendors(vendors)
+        except ValueError as exc:
+            raise ValueError(f"Invalid value for TRADINGAGENTS_DATA_VENDORS: {exc}") from exc
+        # Merge per category: naming one chain does not drop the others.
+        config["data_vendors"] = {**config.get("data_vendors", {}), **overrides}
     for env_var, key in _ENV_OVERRIDES.items():
         raw = os.environ.get(env_var)
         if raw is None or raw == "":
@@ -170,8 +194,8 @@ def build_default_config() -> dict:
         # routed to vendors you didn't choose. For ordered fallback, list several,
         # e.g. "yfinance,alpha_vantage". "default" uses all available vendors.
         "data_vendors": {
-            "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance
-            "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance
+            "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance, cn_market
+            "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance, cn_market
             # Statements come from SEC EDGAR as filed (US filers), then Yahoo; the
         # overview and insider tools, which SEC EDGAR does not serve, from Yahoo.
         "fundamental_data": "sec_edgar,yfinance",  # Options: sec_edgar, alpha_vantage, yfinance

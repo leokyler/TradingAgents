@@ -97,6 +97,12 @@ class VendorRoutingTests(unittest.TestCase):
             result = router.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
         self.assertEqual(result, "AV_DATA")
 
+    def test_cn_market_chain_falls_through_to_yfinance(self):
+        set_config({"data_vendors": {"core_stock_apis": "cn_market,yfinance"}})
+        with self._route({"cn_market": _no_data, "yfinance": _returns("YF_DATA")}):
+            result = router.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+        self.assertEqual(result, "YF_DATA")
+
     def _route_method(self, method, vendors):
         return mock.patch.dict(router.VENDOR_METHODS, {method: vendors}, clear=False)
 
