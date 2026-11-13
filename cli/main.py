@@ -6,6 +6,7 @@ import typer
 from rich.markup import escape
 
 from cli.display import console
+from cli.env_cmd import show_env
 from cli.models import AnalystType, AssetType
 from cli.prompts import filter_analysts_for_asset_type, parse_analysts
 from cli.run import run_analysis
@@ -159,6 +160,10 @@ def backtest(
     for ticker, reason in result.settlement_failures:
         console.print(f"[yellow]unsettled:[/yellow] {ticker}: {reason}")
 
+
+# The `env` report lives in its own module; registering it here keeps this file
+# additive against upstream (see docs/fork.md).
+app.command("env")(show_env)
 
 # The plans `login` and `logout` take: the providers signed in to, not keyed.
 Plan = StrEnum("Plan", {name: name for name in SIGNED_IN_PROVIDERS})

@@ -11,3 +11,11 @@ from dotenv import find_dotenv, load_dotenv
 # caller has already exported are never overridden.
 load_dotenv(find_dotenv(usecwd=True))
 load_dotenv(find_dotenv(".env.enterprise", usecwd=True), override=False)
+
+# The shared, user-level file is read last, so a project's .env still wins. A
+# `tradingagents` installed as a tool runs outside the checkout, where this is
+# the only .env there is; see tradingagents/env.py for the order and why blank
+# values do not shadow it.
+from tradingagents.env import load_user_env  # noqa: E402
+
+load_user_env()

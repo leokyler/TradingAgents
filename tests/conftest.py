@@ -39,6 +39,10 @@ def _own_file_locations():
     os.environ["TRADINGAGENTS_RESULTS_DIR"] = os.path.join(home, "logs")
     os.environ["TRADINGAGENTS_CACHE_DIR"] = os.path.join(home, "cache")
     os.environ["TRADINGAGENTS_MEMORY_LOG_PATH"] = os.path.join(home, "memory", "trading_memory.md")
+    # The shared user-level .env (~/.tradingagents/.env) would otherwise leak the
+    # developer's keys and settings into the suite. Point it at a file that does
+    # not exist; tests of the shared file set their own path.
+    os.environ["TRADINGAGENTS_ENV_FILE"] = os.path.join(home, "shared.env")
 
 
 _own_file_locations()

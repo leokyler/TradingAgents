@@ -11,7 +11,7 @@ This repository is a fork of [TauricResearch/TradingAgents](https://github.com/T
 
 **Upstream files are additive only.** A new capability means a new module plus the smallest registration the shared code needs; it does not mean rewriting an upstream function to call it.
 
-The reason is mechanical: git conflicts on *lines*, and a fork that deletes an upstream block re-conflicts every time upstream edits that block — even when the two changes are unrelated. A dict entry appended at the end of a registry merges cleanly almost every time. The fork's whole upstream footprint is currently **47 deleted lines** across 12 files, down from 160; 118 of those were one function whose body had been moved into a new module.
+The reason is mechanical: git conflicts on *lines*, and a fork that deletes an upstream block re-conflicts every time upstream edits that block — even when the two changes are unrelated. A dict entry appended at the end of a registry merges cleanly almost every time. The fork's whole upstream footprint is currently **49 deleted lines** across 12 files, down from 160; 118 of those were one function whose body had been moved into a new module.
 
 ## Where the fork's own code lives
 
@@ -26,6 +26,8 @@ The reason is mechanical: git conflicts on *lines*, and a fork that deletes an u
 | `tradingagents/dataflows/vendors/transport.py` | proxy-bypass session, request spacing, per-host breaker, browser fingerprint |
 | `tradingagents/dataflows/vendors/{cn_market,tushare,eastmoney}.py` | the three data vendors |
 | `tradingagents/llm_clients/opencode_go.py` | the gateway's `ProviderSpec` and client (registers itself on import) |
+| `tradingagents/env.py` | the shared `~/.tradingagents/.env` loader, the pasted-key target, and the files `tradingagents env` reports on |
+| `cli/env_cmd.py` | the `tradingagents env` report (registered by one line in `cli/main.py`) |
 
 ## The upstream edit points that remain
 
@@ -34,7 +36,7 @@ Every entry below is a deliberate edit to an upstream file, and the list is mean
 | File | What it is | Why it cannot be additive |
 |---|---|---|
 | `tradingagents/dataflows/vendors/yahoo/market.py` | **untouched** — the fork keeps its own copy of the indicator table | (reverted: this was the 118-line deletion) |
-| `cli/prompts.py` | `filter_analysts_for_asset_type` body is a table lookup | the rule itself changed: a stock run now excludes the ETF analyst |
+| `cli/prompts.py` | `filter_analysts_for_asset_type` body is a table lookup; the pasted-key target is one expression (`api_key_target`) | the rule itself changed: a stock run now excludes the ETF analyst |
 | `tradingagents/agents/context.py` | asset labels read `profile_for(...)` | three conditionals are replaced by one lookup |
 | `agents/researchers/{bull,bear}_researcher.py` | label block reads `profile_for(...)` | same, and the prompt strings above it stay upstream-identical |
 | `agents/analysts/news_analyst.py` | one label line | same |
@@ -43,7 +45,8 @@ Every entry below is a deliberate edit to an upstream file, and the list is mean
 | `llm_clients/factory.py` | the effort-provider tuple gains a member; a tier's effort overrides the shared one | a one-tuple edit and a default cascade |
 | `llm_clients/openai_client.py` | one condition: the native-OpenAI model-name gate skips the gateway | the gateway accepts effort levels native OpenAI would reject |
 | `graph/trading_graph.py` | `record_decision` runs the gate; the state log carries `etf_report`; one warning when a fund run selects no ETF analyst | the gate must sit on the path both the CLI and the API share |
-| `cli/{main,display}.py` | one help string, and the analyst registries' entries | additive, listed for completeness |
+| `cli/{main,display}.py` | one help string, the analyst registries' entries, and the `env` command registration (the report lives in `cli/env_cmd.py`) | additive, listed for completeness |
+| `tradingagents/__init__.py` | a few added lines at the end call `load_user_env()` after the two upstream loaders | additive, listed for completeness |
 | `default_config.py` | new keys only (`evidence_gate`, the tier efforts, `etf_data`) | purely additive |
 
 ## Syncing

@@ -229,6 +229,17 @@ Alternatively, copy `.env.example` to `.env` and fill in your keys:
 cp .env.example .env
 ```
 
+Settings are read from the shell environment first, then from a `.env` found in
+the working directory or above it, and finally from a shared, user-level file at
+`~/.tradingagents/.env`. The shared file is the one to keep keys in when
+`tradingagents` is installed as a tool, since that command runs outside any
+checkout; a project's `.env` still overrides it, and a blank key in a copied
+`.env.example` does not shadow it. Set `TRADINGAGENTS_ENV_FILE=/path/to/file` to
+read the shared values from somewhere else, such as a secrets manager's rendered
+output. `tradingagents env` prints which files were read and which keys each one
+sets — values are never shown. A key pasted at the prompt is saved to a
+project's `.env`, or to the shared file once it exists.
+
 ### CLI Usage
 
 Launch the interactive CLI:

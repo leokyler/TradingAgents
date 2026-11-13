@@ -2,7 +2,6 @@ import datetime
 import os
 import subprocess
 import sys
-from pathlib import Path
 
 import questionary
 import typer
@@ -13,6 +12,7 @@ from cli.display import console
 from cli.models import AnalystType, AssetType
 from tradingagents.dataflows.etf import is_a_share_etf
 from tradingagents.dataflows.symbols import safe_ticker_component
+from tradingagents.env import api_key_target
 from tradingagents.llm_clients.api_key_env import get_api_key_env
 from tradingagents.llm_clients.model_catalog import get_model_options
 from tradingagents.llm_clients.openai_client import OPENAI_COMPATIBLE_PROVIDERS, SIGNED_IN_PROVIDERS
@@ -753,7 +753,7 @@ def ensure_api_key(provider: str) -> str | None:
         )
         return None
 
-    env_path = find_dotenv(usecwd=True) or str(Path.cwd() / ".env")
+    env_path = str(api_key_target(find_dotenv(usecwd=True)))
     # The file holds credentials, so make it owner-only before writing: create
     # it 0600 when absent, and tighten an existing one (set_key keeps the mode).
     if not os.path.exists(env_path):
