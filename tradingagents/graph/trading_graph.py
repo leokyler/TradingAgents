@@ -9,7 +9,7 @@ from typing import Any
 
 import tradingagents
 from tradingagents.agents.context import build_instrument_context, resolve_instrument_identity
-from tradingagents.agents.evidence import gate_signal
+from tradingagents.agents.evidence import apply_gate_note, gate_signal
 from tradingagents.agents.rating import run_rating
 from tradingagents.dataflows.config import run_config, run_config_context, set_config
 from tradingagents.dataflows.date_window import get_current_date, is_historical
@@ -369,8 +369,8 @@ class TradingAgentsGraph:
         signal, gate_note = gate_signal(final_state, run_rating(final_state), self.config)
         if gate_note:
             final_state["final_rating"] = signal
-            final_state["final_trade_decision"] = (
-                (final_state.get("final_trade_decision") or "") + gate_note
+            final_state["final_trade_decision"] = apply_gate_note(
+                final_state.get("final_trade_decision") or "", gate_note
             )
         return signal
 
@@ -381,7 +381,7 @@ class TradingAgentsGraph:
         A run with no price series is recorded as REVIEW by the evidence gate, so
         neither path can persist a call the data does not support.
         """
-        self.apply_evidence_gate(final_state)
+        rating = self.apply_evidence_gate(final_state)
         self._log_state(trade_date, final_state)
         decision = final_state.get("final_trade_decision")
         if not decision:
@@ -390,7 +390,7 @@ class TradingAgentsGraph:
             return
         self.memory_log.store_decision(
             ticker=company_name, trade_date=trade_date, final_trade_decision=decision,
-            rating=run_rating(final_state),
+            rating=rating,
         )
 
     def _run_graph(self, company_name, trade_date, asset_type: str = "stock",

@@ -6,10 +6,11 @@ import unittest
 import pytest
 
 from tradingagents.agents.context import build_instrument_context
-from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.dataflows import date_window
-from tradingagents.dataflows.etf import eastmoney_secid, etf_code, is_a_share_etf, stock_secid
+from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.dataflows.etf import etf_code, is_a_share_etf
 from tradingagents.dataflows.vendors import eastmoney
+from tradingagents.dataflows.vendors.eastmoney import eastmoney_secid, stock_secid
 
 # The Eastmoney fixtures describe this date. Pinning "today" keeps them honest:
 # a day later every present-day snapshot is withheld as historical and the

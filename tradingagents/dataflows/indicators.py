@@ -1,14 +1,27 @@
-"""Technical-indicator rendering shared by the price vendors.
+"""Technical-indicator rendering shared by the fork's A-share price vendors.
 
-Both price vendors hand a daily OHLCV frame to stockstats and render the same
-window text, so the analyst reads one format whichever vendor served the bars.
+``cn_market`` and ``tushare`` both hand a daily OHLCV frame to stockstats and
+render the same window text, so the analyst reads one format whichever vendor
+served the bars.
+
+``INDICATOR_DESCRIPTIONS`` is a copy of the table inside
+``vendors.yahoo.market.get_stock_stats_indicators_window``, kept here rather
+than extracted from it: this repository is a fork of an upstream that maintains
+that function, and moving its body out would turn every upstream edit of a
+description into a merge conflict. The prose below is static reference text, so
+the copy drifts only when upstream rewrites a description.
 """
+
+from __future__ import annotations
 
 from datetime import datetime
 
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 from stockstats import wrap
+
+# Enough history for the 200-day averages the analyst asks for.
+HISTORY_DAYS = 400
 
 
 INDICATOR_DESCRIPTIONS: dict[str, str] = {
@@ -84,13 +97,22 @@ INDICATOR_DESCRIPTIONS: dict[str, str] = {
     ),
 }
 
-def indicator_values(data: pd.DataFrame, indicator: str) -> dict[str, str]:
-    """stockstats values for every bar in ``data``, keyed by ``YYYY-MM-DD``."""
+def require_supported(indicator: str) -> None:
+    """Raise for an indicator the data layer does not compute.
+
+    One message for the whole layer: a vendor that checks before it fetches and
+    the renderer that would otherwise fail afterwards both come through here.
+    """
     if indicator not in INDICATOR_DESCRIPTIONS:
         raise ValueError(
             f"Indicator {indicator} is not supported. "
             f"Please choose from: {list(INDICATOR_DESCRIPTIONS)}"
         )
+
+
+def indicator_values(data: pd.DataFrame, indicator: str) -> dict[str, str]:
+    """stockstats values for every bar in ``data``, keyed by ``YYYY-MM-DD``."""
+    require_supported(indicator)
     frame = wrap(data.copy())
     frame["Date"] = pd.to_datetime(frame["Date"]).dt.strftime("%Y-%m-%d")
     frame[indicator]  # stockstats computes the column on access
@@ -105,11 +127,7 @@ def format_indicator_window(
     indicator: str, as_of_date: str, look_back_days: int, values: dict[str, str]
 ) -> str:
     """The dated table the analyst reads, ending with the indicator's description."""
-    if indicator not in INDICATOR_DESCRIPTIONS:
-        raise ValueError(
-            f"Indicator {indicator} is not supported. "
-            f"Please choose from: {list(INDICATOR_DESCRIPTIONS)}"
-        )
+    require_supported(indicator)
     as_of_dt = datetime.strptime(as_of_date, "%Y-%m-%d")
     before = as_of_dt - relativedelta(days=look_back_days)
     lines = []

@@ -1,4 +1,4 @@
-"""ETF identification and A-share fund-code conventions.
+"""A-share fund-code conventions: which Shanghai/Shenzhen listings are ETFs.
 
 The rest of the data layer assumes a single listed equity: statements, insiders,
 retail cashtags. An exchange-traded fund is a basket, so those inputs do not
@@ -16,6 +16,8 @@ Code ranges (2026):
 
 A bare 6-digit code carries no exchange, so it is not treated as an ETF: the
 suffix decides which market the vendor is asked about.
+
+Vendor-side id encodings (Eastmoney's ``1.510300``) stay with their vendor.
 """
 
 from __future__ import annotations
@@ -49,27 +51,3 @@ def etf_code(ticker: str) -> str | None:
 def is_a_share_etf(ticker: str) -> bool:
     """Whether ``ticker`` is a Shanghai/Shenzhen listed fund."""
     return etf_code(ticker) is not None
-
-
-def eastmoney_secid(ticker: str) -> str | None:
-    """Eastmoney's market-qualified id (``1.510300`` / ``0.159919``).
-
-    Eastmoney prefixes Shanghai with ``1`` and Shenzhen with ``0``; the suffix
-    of the Yahoo symbol is what decides, so no lookup is needed.
-    """
-    canonical = normalize_symbol(ticker)
-    if canonical.endswith(".SS"):
-        return f"1.{canonical[:-3]}"
-    if canonical.endswith(".SZ"):
-        return f"0.{canonical[:-3]}"
-    return None
-
-
-def stock_secid(code: str) -> str:
-    """Eastmoney id for an A-share constituent, from its bare 6-digit code.
-
-    Shanghai codes start with 6 (main board), 5 (funds) or 9 (B shares);
-    Shenzhen codes start with 0 or 3. The rule mirrors ``eastmoney_secid`` but
-    works on the codes a holdings file reports, which carry no exchange suffix.
-    """
-    return f"1.{code}" if code[:1] in ("5", "6", "9") else f"0.{code}"

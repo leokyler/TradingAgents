@@ -24,14 +24,18 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_CHECKPOINT_ENABLED":   "checkpoint_enabled",
     "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
     "TRADINGAGENTS_TEMPERATURE":          "temperature",
-    "TRADINGAGENTS_EVIDENCE_GATE":         "evidence_gate",
+    "TRADINGAGENTS_EVIDENCE_GATE":        "evidence_gate",
     "TRADINGAGENTS_LLM_MAX_RETRIES":      "llm_max_retries",
     "TRADINGAGENTS_MAX_TOKENS":           "max_tokens",
+    # Reasoning effort per model tier: the analysts/debate/trader run at the
+    # quick tier, the two managers at the deep one. Environment- or config-only
+    # (there is no interactive prompt); unset falls back to the provider-wide
+    # value below, then to the model's own default.
+    "TRADINGAGENTS_QUICK_THINK_EFFORT":   "quick_think_reasoning_effort",
+    "TRADINGAGENTS_DEEP_THINK_EFFORT":    "deep_think_reasoning_effort",
     # Provider-specific reasoning/thinking knobs (None = each provider's own
     # default). Settable here for non-interactive runs; the CLI also offers an
     # interactive choice, which is skipped when the matching var is set.
-    "TRADINGAGENTS_QUICK_THINK_EFFORT":    "quick_think_reasoning_effort",
-    "TRADINGAGENTS_DEEP_THINK_EFFORT":     "deep_think_reasoning_effort",
     "TRADINGAGENTS_GOOGLE_THINKING_LEVEL":   "google_thinking_level",
     "TRADINGAGENTS_OPENAI_REASONING_EFFORT": "openai_reasoning_effort",
     "TRADINGAGENTS_ANTHROPIC_EFFORT":        "anthropic_effort",
@@ -194,17 +198,18 @@ def build_default_config() -> dict:
         # routed to vendors you didn't choose. For ordered fallback, list several,
         # e.g. "yfinance,alpha_vantage". "default" uses all available vendors.
         "data_vendors": {
-            "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance, cn_market, tushare
-            "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance, cn_market, tushare
+            "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance
+            "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance
             # Statements come from SEC EDGAR as filed (US filers), then Yahoo; the
         # overview and insider tools, which SEC EDGAR does not serve, from Yahoo.
         "fundamental_data": "sec_edgar,yfinance",  # Options: sec_edgar, alpha_vantage, yfinance
             "news_data": "yfinance",             # Options: alpha_vantage, yfinance
             "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)
             "prediction_markets": "polymarket",  # Options: polymarket (keyless)
-            # Fund-level data for A-share ETFs (profile, holdings, basket
-            # valuation). Yahoo has no fund data for Chinese ETFs.
-            "etf_data": "eastmoney",             # Options: eastmoney (keyless), tushare (token)
+            # Fund-level data for A-share ETFs. Eastmoney (keyless) serves the
+            # profile, the holdings and the basket valuation; Tushare serves the
+            # profile only, so list it *before* eastmoney rather than alone.
+            "etf_data": "eastmoney",
         },
         # Tool-level configuration (takes precedence over category-level)
         "tool_vendors": {

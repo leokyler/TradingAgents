@@ -1,3 +1,4 @@
+from tradingagents.agents.asset_profiles import profile_for
 from tradingagents.agents.context import (
     get_instrument_context_from_state,
     get_language_instruction,
@@ -21,12 +22,9 @@ def create_bear_researcher(llm):
         fundamentals_report = report_or_absent(state["fundamentals_report"], "fundamentals")
         etf_report = report_or_absent(state.get("etf_report", ""), "ETF")
         instrument_context = get_instrument_context_from_state(state)
-        asset_type = state.get("asset_type", "stock")
-        target_label = {"stock": "stock", "etf": "fund"}.get(asset_type, "asset")
-        fundamentals_label = {
-            "stock": "Company fundamentals report",
-            "etf": "Company fundamentals report (not applicable: a fund files none)",
-        }.get(asset_type, "Asset fundamentals report (may be unavailable for crypto)")
+        profile = profile_for(state.get("asset_type", "stock"))
+        target_label = profile.target_label
+        fundamentals_label = profile.fundamentals_label
 
         prompt = f"""You are a Bear Analyst making the case against investing in the {target_label}. Your goal is to present a well-reasoned argument emphasizing risks, challenges, and negative indicators. Leverage the provided research and data to highlight potential downsides and counter bullish arguments effectively.
 

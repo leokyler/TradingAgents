@@ -50,6 +50,10 @@ def create_llm_client(
         return BedrockClient(model, base_url, **kwargs)
 
     from .openai_client import OpenAIClient, is_openai_compatible
+    # The gateway's ProviderSpec lives in its own module, imported for the
+    # registration side effect, so the shared registry stays upstream-shaped.
+    if provider_lower == "opencode-go":
+        from . import opencode_go  # noqa: F401
     if is_openai_compatible(provider_lower):
         return OpenAIClient(model, base_url, provider=provider_lower, **kwargs)
 

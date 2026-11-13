@@ -5,6 +5,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
+from tradingagents.agents.asset_profiles import profile_for
 from tradingagents.dataflows.date_window import is_historical
 from tradingagents.dataflows.symbols import normalize_symbol
 from tradingagents.dataflows.vendors.yahoo.fundamentals import get_company_profile
@@ -124,18 +125,16 @@ def build_instrument_context(
     industry or exchange it holds today is not given, since it may not have held
     on the analysis date.
     """
-    is_crypto = asset_type == "crypto"
-    is_etf = asset_type == "etf"
-    instrument_label = "fund" if is_etf else ("asset" if is_crypto else "instrument")
+    profile = profile_for(asset_type)
     context = (
-        f"The {instrument_label} to analyze is `{ticker}`. "
+        f"The {profile.instrument_label} to analyze is `{ticker}`. "
         "The tools serve this instrument; refer to it by this exact ticker in every report and recommendation, "
         "preserving any exchange suffix (e.g. `.TO`, `.L`, `.HK`, `.T`, `-USD`)."
     )
 
     identity = identity or {}
     name = identity.get("company_name") or identity.get("name")
-    label = "Fund" if is_etf else ("Name" if is_crypto else "Company")
+    label = profile.name_label
     details = []
     if is_historical(trade_date):
         if name:
@@ -163,19 +162,7 @@ def build_instrument_context(
             "result explicitly disproves this resolved identity."
         )
 
-    if is_crypto:
-        context += (
-            " Treat it as a crypto asset rather than a company, and do not "
-            "assume company fundamentals are available."
-        )
-    if is_etf:
-        context += (
-            " This instrument is an exchange-traded fund: a basket of securities held "
-            "in a fund, not a company. It files no company financial statements and has "
-            "no insiders or earnings call. Analyze the tracked index, the valuation of "
-            "the basket, the fund's size and liquidity, and the premium or discount to "
-            "NAV; do not look for company fundamentals that do not exist."
-        )
+    context += profile.guidance
     canonical = normalize_symbol(str(ticker))
     if canonical.endswith((".SS", ".SZ")):
         context += (

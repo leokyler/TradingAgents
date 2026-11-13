@@ -22,33 +22,30 @@ multiplied by 100; Sina already quotes shares.
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 from datetime import datetime
 
 import pandas as pd
-import requests
 from dateutil.relativedelta import relativedelta
 
+from tradingagents.dataflows import prices
 from tradingagents.dataflows.date_window import get_current_date
 from tradingagents.dataflows.errors import NoMarketDataError, VendorUnavailableError
 from tradingagents.dataflows.indicators import (
-    INDICATOR_DESCRIPTIONS,
+    HISTORY_DAYS,
     format_indicator_window,
     indicator_values,
+    require_supported,
 )
 from tradingagents.dataflows.symbols import normalize_symbol
-from tradingagents.dataflows.vendors.eastmoney import _get as _eastmoney_get
+from tradingagents.dataflows.vendors import transport
 
 _TIMEOUT = 10.0
 
 # A frame whose newest bar is older than this many calendar days is treated as
 # stale, the same guard the Yahoo vendor applies; long holiday weekends fit.
 MAX_STALE_DAYS = 10
-
-# Enough history for the 200-day averages the analyst asks for.
-INDICATOR_HISTORY_DAYS = 400
 
 _SHARES_PER_LOT = 100
 
@@ -73,23 +70,6 @@ def _secid(symbol: str) -> tuple[str, str, str]:
     market_id = "1" if market == "SS" else "0"
     prefix = "sh" if market == "SS" else "sz"
     return canonical, f"{market_id}.{code}", f"{prefix}{code}"
-
-
-def _price_text(value: float) -> str:
-    """A price with at least two decimals, trailing zeros trimmed (Yahoo's style)."""
-    text = f"{value:.6f}".rstrip("0")
-    whole, _, fraction = text.partition(".")
-    if len(fraction) < 2:
-        fraction = fraction.ljust(2, "0")
-    return f"{whole}.{fraction}"
-
-
-def _load_json(body: str, source: str):
-    """A vendor JSON body, or a typed transport error when it is unparseable."""
-    try:
-        return json.loads(body)
-    except ValueError as exc:
-        raise VendorUnavailableError(f"{source} returned unparseable JSON") from exc
 
 
 def _to_frame(rows) -> pd.DataFrame:
@@ -143,7 +123,7 @@ def _eastmoney_klines(canonical: str, secid: str, start: datetime, end: datetime
         },
         referer=f"https://quote.eastmoney.com/{canonical.split('.')[0]}.html",
     )
-    payload = _load_json(body, "Eastmoney")
+    payload = transport.json_body(body, "Eastmoney")
     rows = ((payload.get("data") or {}).get("klines")) or []
     frame = _to_frame(row.split(",")[:6] for row in rows)
     if not frame.empty:
@@ -156,7 +136,7 @@ def _tencent_klines(canonical: str, symbol: str, start: datetime, end: datetime)
         "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
         {"param": f"{symbol},day,,,{_bar_count(start)},qfq"},
     )
-    payload = _load_json(body, "Tencent")
+    payload = transport.json_body(body, "Tencent")
     node = (payload.get("data") or {}).get(symbol) or {}
     rows = node.get("qfqday") or node.get("day") or []
     frame = _to_frame(row[:6] for row in rows)
@@ -170,29 +150,20 @@ def _sina_klines(canonical: str, symbol: str, start: datetime, end: datetime) ->
         "https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData",
         {"symbol": symbol, "scale": "240", "ma": "no", "datalen": str(_bar_count(start))},
     )
-    rows = _load_json(body, "Sina")
+    rows = transport.json_body(body, "Sina")
     if not isinstance(rows, list):
         rows = []
     return _to_frame(rows)
 
 
-_plain_session: requests.Session | None = None
+def _eastmoney_get(url: str, **kwargs) -> str:
+    """The Eastmoney edge, browser-fingerprinted: it rejects a plain TLS hello."""
+    return transport.get(url, browser=True, timeout=_TIMEOUT, **kwargs)
 
 
 def _plain_get(url: str, params: dict) -> str:
     """GET a mainland endpoint directly (proxies only get in the way of CN hosts)."""
-    global _plain_session
-    if _plain_session is None:
-        session = requests.Session()
-        session.trust_env = False
-        session.headers.update({"User-Agent": "Mozilla/5.0 (compatible; TradingAgents)"})
-        _plain_session = session
-    try:
-        response = _plain_session.get(url, params=params, timeout=_TIMEOUT)
-        response.raise_for_status()
-        return response.text
-    except requests.RequestException as exc:
-        raise VendorUnavailableError(f"CN quote endpoint request failed for {url}: {exc}") from exc
+    return transport.get(url, params=params, timeout=_TIMEOUT)
 
 
 def _clip(frame: pd.DataFrame, start: datetime, end: datetime) -> pd.DataFrame:
@@ -235,7 +206,7 @@ def _klines(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
     )
     first_no_data: NoMarketDataError | None = None
     last_unavailable: VendorUnavailableError | None = None
-    for name, fetch in sources:
+    for _name, fetch in sources:
         try:
             frame = _clip(fetch(), start, end)
         except NoMarketDataError as exc:
@@ -271,31 +242,18 @@ def get_stock_data(symbol: str, start_date: str, end_date: str) -> str:
     """Daily OHLCV as the CSV text the analyst reads, priced from CN endpoints."""
     canonical, _, _ = _secid(symbol)
     frame = _klines(canonical, start_date, end_date)
-    lines = [
-        f"# Stock data for {canonical} from {start_date} to {end_date}",
-        f"# Total records: {len(frame)}",
-        "# Source: public China quote endpoints (forward-adjusted where available)",
-        "",
-        "Date,Open,High,Low,Close,Volume",
-    ]
-    for row in frame.itertuples(index=False):
-        lines.append(
-            f"{row.Date:%Y-%m-%d},{_price_text(row.Open)},{_price_text(row.High)},"
-            f"{_price_text(row.Low)},{_price_text(row.Close)},{int(row.Volume)}"
-        )
-    return "\n".join(lines)
+    return prices.render_ohlcv(
+        frame, canonical, start_date, end_date,
+        "public China quote endpoints (forward-adjusted where available)",
+    )
 
 
 def get_indicators(symbol: str, indicator: str, as_of_date: str, look_back_days: int) -> str:
     """One indicator's dated window, computed from CN daily bars."""
-    if indicator not in INDICATOR_DESCRIPTIONS:
-        raise ValueError(
-            f"Indicator {indicator} is not supported. "
-            f"Please choose from: {list(INDICATOR_DESCRIPTIONS)}"
-        )
+    require_supported(indicator)
     canonical, _, _ = _secid(symbol)
     as_of = datetime.strptime(as_of_date, "%Y-%m-%d")
-    start = (as_of - relativedelta(days=INDICATOR_HISTORY_DAYS)).strftime("%Y-%m-%d")
+    start = (as_of - relativedelta(days=HISTORY_DAYS)).strftime("%Y-%m-%d")
     frame = _klines(canonical, start, as_of_date)
     values = indicator_values(frame, indicator)
     return format_indicator_window(indicator, as_of_date, look_back_days, values)

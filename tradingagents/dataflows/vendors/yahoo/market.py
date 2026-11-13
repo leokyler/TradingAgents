@@ -10,10 +10,6 @@ from stockstats import wrap
 from tradingagents.dataflows.errors import NoMarketDataError, VendorError
 from tradingagents.dataflows.symbols import normalize_symbol
 from tradingagents.dataflows.vendors.yahoo.common import price_text, raise_for_empty, yf_retry
-from tradingagents.dataflows.indicators import (
-    INDICATOR_DESCRIPTIONS,
-    format_indicator_window,
-)
 from tradingagents.dataflows.vendors.yahoo.ohlcv import _assert_ohlcv_not_stale, load_ohlcv
 
 logger = logging.getLogger(__name__)
@@ -75,30 +71,135 @@ def get_stock_stats_indicators_window(
     ],
     look_back_days: Annotated[int, "how many days to look back"],
 ) -> str:
-    if indicator not in INDICATOR_DESCRIPTIONS:
+
+    best_ind_params = {
+        # Moving Averages
+        "close_50_sma": (
+            "50 SMA: A medium-term trend indicator. "
+            "Usage: Identify trend direction and serve as dynamic support/resistance. "
+            "Tips: It lags price; combine with faster indicators for timely signals."
+        ),
+        "close_200_sma": (
+            "200 SMA: A long-term trend benchmark. "
+            "Usage: Confirm overall market trend and identify golden/death cross setups. "
+            "Tips: It reacts slowly; best for strategic trend confirmation rather than frequent trading entries."
+        ),
+        "close_10_ema": (
+            "10 EMA: A responsive short-term average. "
+            "Usage: Capture quick shifts in momentum and potential entry points. "
+            "Tips: Prone to noise in choppy markets; use alongside longer averages for filtering false signals."
+        ),
+        # MACD Related
+        "macd": (
+            "MACD: Computes momentum via differences of EMAs. "
+            "Usage: Look for crossovers and divergence as signals of trend changes. "
+            "Tips: Confirm with other indicators in low-volatility or sideways markets."
+        ),
+        "macds": (
+            "MACD Signal: An EMA smoothing of the MACD line. "
+            "Usage: Use crossovers with the MACD line to trigger trades. "
+            "Tips: Should be part of a broader strategy to avoid false positives."
+        ),
+        "macdh": (
+            "MACD Histogram: Shows the gap between the MACD line and its signal. "
+            "Usage: Visualize momentum strength and spot divergence early. "
+            "Tips: Can be volatile; complement with additional filters in fast-moving markets."
+        ),
+        # Momentum Indicators
+        "rsi": (
+            "RSI: Measures momentum to flag overbought/oversold conditions. "
+            "Usage: Apply 70/30 thresholds and watch for divergence to signal reversals. "
+            "Tips: In strong trends, RSI may remain extreme; always cross-check with trend analysis."
+        ),
+        # Volatility Indicators
+        "boll": (
+            "Bollinger Middle: A 20 SMA serving as the basis for Bollinger Bands. "
+            "Usage: Acts as a dynamic benchmark for price movement. "
+            "Tips: Combine with the upper and lower bands to effectively spot breakouts or reversals."
+        ),
+        "boll_ub": (
+            "Bollinger Upper Band: Typically 2 standard deviations above the middle line. "
+            "Usage: Signals potential overbought conditions and breakout zones. "
+            "Tips: Confirm signals with other tools; prices may ride the band in strong trends."
+        ),
+        "boll_lb": (
+            "Bollinger Lower Band: Typically 2 standard deviations below the middle line. "
+            "Usage: Indicates potential oversold conditions. "
+            "Tips: Use additional analysis to avoid false reversal signals."
+        ),
+        "atr": (
+            "ATR: Averages true range to measure volatility. "
+            "Usage: Set stop-loss levels and adjust position sizes based on current market volatility. "
+            "Tips: It's a reactive measure, so use it as part of a broader risk management strategy."
+        ),
+        # Volume-Based Indicators
+        "vwma": (
+            "VWMA: A moving average weighted by volume. "
+            "Usage: Confirm trends by integrating price action with volume data. "
+            "Tips: Watch for skewed results from volume spikes; use in combination with other volume analyses."
+        ),
+        "mfi": (
+            "MFI: The Money Flow Index is a momentum indicator that uses both price and volume to measure buying and selling pressure. "
+            "Usage: Identify overbought (>80) or oversold (<20) conditions and confirm the strength of trends or reversals. "
+            "Tips: Use alongside RSI or MACD to confirm signals; divergence between price and MFI can indicate potential reversals."
+        ),
+    }
+
+    if indicator not in best_ind_params:
         raise ValueError(
-            f"Indicator {indicator} is not supported. Please choose from: {list(INDICATOR_DESCRIPTIONS)}"
+            f"Indicator {indicator} is not supported. Please choose from: {list(best_ind_params.keys())}"
         )
 
+    end_date = as_of_date
     as_of_dt = datetime.strptime(as_of_date, "%Y-%m-%d")
     before = as_of_dt - relativedelta(days=look_back_days)
 
-    # One fetch, every bar: computing each date separately would re-read the
-    # same series once per day in the window.
+    # Optimized: Get stock data once and calculate indicators for all dates
     try:
-        values = _get_stock_stats_bulk(symbol, indicator, as_of_date)
+        indicator_data = _get_stock_stats_bulk(symbol, indicator, as_of_date)
+
+        # Generate the date range we need
+        current_dt = as_of_dt
+        date_values = []
+
+        while current_dt >= before:
+            date_str = current_dt.strftime('%Y-%m-%d')
+
+            # Look up the indicator value for this date
+            if date_str in indicator_data:
+                indicator_value = indicator_data[date_str]
+            else:
+                indicator_value = "N/A: Not a trading day (weekend or holiday)"
+
+            date_values.append((date_str, indicator_value))
+            current_dt = current_dt - relativedelta(days=1)
+
+        ind_string = ""
+        for date_str, value in date_values:
+            ind_string += f"{date_str}: {value}\n"
+
     except VendorError:
         raise  # Unknown/delisted symbol — let the router emit the sentinel
     except Exception as e:
         logger.warning("Bulk stockstats fetch failed, falling back per-day: %s", e)
-        values = {}
-        current_dt = as_of_dt
-        while current_dt >= before:
-            day = current_dt.strftime("%Y-%m-%d")
-            values[day] = get_stockstats_indicator(symbol, indicator, day)
-            current_dt = current_dt - relativedelta(days=1)
+        # Fallback to original implementation if bulk method fails
+        ind_string = ""
+        as_of_dt = datetime.strptime(as_of_date, "%Y-%m-%d")
+        while as_of_dt >= before:
+            indicator_value = get_stockstats_indicator(
+                symbol, indicator, as_of_dt.strftime("%Y-%m-%d")
+            )
+            ind_string += f"{as_of_dt.strftime('%Y-%m-%d')}: {indicator_value}\n"
+            as_of_dt = as_of_dt - relativedelta(days=1)
 
-    return format_indicator_window(indicator, as_of_date, look_back_days, values)
+    result_str = (
+        f"## {indicator} values from {before.strftime('%Y-%m-%d')} to {end_date}:\n\n"
+        + ind_string
+        + "\n\n"
+        + best_ind_params.get(indicator, "No description available.")
+    )
+
+    return result_str
 
 
 def _get_stock_stats_bulk(

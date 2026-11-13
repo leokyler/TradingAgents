@@ -4,16 +4,15 @@ Each dated tool takes the run's ``trade_date`` from graph state (``InjectedState
 and never serves data past it, whatever date the model asks for.
 """
 
-import io
 from datetime import datetime, timedelta
 from typing import Annotated, Literal
 
-import pandas as pd
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
 from tradingagents.dataflows.date_window import as_of, as_of_window
 from tradingagents.dataflows.errors import NoMarketDataError, VendorUnavailableError
+from tradingagents.dataflows.prices import frame_from_text as frame_from_price_text
 from tradingagents.dataflows.router import no_data_available, route_to_vendor, vendor_unavailable
 from tradingagents.dataflows.vendors.yahoo.snapshot import (
     build_verified_market_snapshot,
@@ -117,18 +116,8 @@ def _snapshot_from_routed_prices(symbol: str, as_of_date: str, look_back_days: i
         text = route_to_vendor("get_stock_data", symbol, start, as_of_date)
     except Exception:  # noqa: BLE001 — the caller still has its sentinel path
         return None
-    if not text or text.startswith(("DATA_UNAVAILABLE", "NO_DATA_AVAILABLE")):
-        return None
-    rows = [line for line in text.splitlines() if line.strip() and not line.startswith("#")]
-    try:
-        frame = pd.read_csv(io.StringIO("\n".join(rows)))
-    except Exception:  # noqa: BLE001 — not a price table; leave the sentinel path
-        return None
-    if frame.empty or "Date" not in frame.columns:
-        return None
-    frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce")
-    frame = frame.dropna(subset=["Date"]).sort_values("Date")
-    if frame.empty:
+    frame = frame_from_price_text(text)
+    if frame is None:
         return None
     return render_verified_snapshot(frame, symbol, as_of_date, look_back_days)
 

@@ -168,3 +168,33 @@ def test_record_decision_keeps_a_backed_rating(monkeypatch):
     assert state["final_rating"] == "Sell"
     assert stored["rating"] == "Sell"
     assert "Data coverage" not in state["final_trade_decision"]
+
+
+@pytest.mark.unit
+def test_gated_text_no_longer_announces_the_old_rating(monkeypatch):
+    """The header says REVIEW, so the opening line must not still say Buy."""
+    from tradingagents.agents.rating import extract_rating
+
+    monkeypatch.setattr(evidence, "price_data_available", lambda *a: False)
+    state = {"company_of_interest": "510300.SS", "trade_date": "2026-11-12"}
+    signal, note = evidence.gate_signal(state, "Buy", {"evidence_gate": True})
+
+    text = evidence.apply_gate_note("**Rating**: Buy\n\nBuy it.", note)
+
+    assert signal == RATING_REVIEW
+    assert text.startswith("**Rating**: REVIEW")
+    assert "Data coverage" in text
+    # The shared parser agrees: a gated decision is not a tradeable rating.
+    assert extract_rating(text) is None
+
+
+@pytest.mark.unit
+def test_gate_note_leaves_a_decision_without_a_rating_line_alone(monkeypatch):
+    monkeypatch.setattr(evidence, "price_data_available", lambda *a: False)
+    state = {"company_of_interest": "510300.SS", "trade_date": "2026-11-12"}
+    _, note = evidence.gate_signal(state, "Hold", {"evidence_gate": True})
+
+    text = evidence.apply_gate_note("No rating line here.", note)
+
+    assert text.startswith("No rating line here.")
+    assert "Data coverage" in text

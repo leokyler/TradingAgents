@@ -153,7 +153,7 @@ class MessageBuffer:
                 "final_trade_decision": "Portfolio Management Decision",
             }
             self.current_report = (
-                f"### {section_titles.get(latest_section, latest_section)}\n{latest_content}"
+                f"### {section_titles[latest_section]}\n{latest_content}"
             )
 
 

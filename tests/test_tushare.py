@@ -79,21 +79,21 @@ class TestTusharePriceData(unittest.TestCase):
         assert seen["ts_code"] == "600519.SH"
 
     def test_empty_answer_is_no_data(self):
-        with mock.patch.object(ts, "_api", lambda *a, **k: pd.DataFrame()):
-            with pytest.raises(NoMarketDataError):
-                ts.get_stock_data("515070.SS", "2026-11-01", "2026-11-12")
+        with mock.patch.object(ts, "_api", lambda *a, **k: pd.DataFrame()), \
+                pytest.raises(NoMarketDataError):
+            ts.get_stock_data("515070.SS", "2026-11-01", "2026-11-12")
 
     def test_stale_frame_is_no_data(self):
         stale = _bars(periods=2, end="2026-10-20")
-        with mock.patch.object(ts, "_api", lambda *a, **k: stale):
-            with pytest.raises(NoMarketDataError):
-                ts.get_stock_data("515070.SS", "2026-10-01", "2026-11-12")
+        with mock.patch.object(ts, "_api", lambda *a, **k: stale), \
+                pytest.raises(NoMarketDataError):
+            ts.get_stock_data("515070.SS", "2026-10-01", "2026-11-12")
 
     def test_missing_token_is_not_configured(self):
-        with mock.patch.dict(os.environ, {}, clear=False):
+        with mock.patch.dict(os.environ, {}, clear=False), \
+                pytest.raises(VendorNotConfiguredError, match="TUSHARE_TOKEN"):
             os.environ.pop("TUSHARE_TOKEN", None)
-            with pytest.raises(VendorNotConfiguredError, match="TUSHARE_TOKEN"):
-                ts._api("fund_daily", ts_code="515070.SH")
+            ts._api("fund_daily", ts_code="515070.SH")
 
     def test_api_error_is_a_vendor_error(self):
         class Response:
@@ -107,9 +107,9 @@ class TestTusharePriceData(unittest.TestCase):
             def post(self, *a, **k):
                 return Response()
 
-        with mock.patch.object(ts, "_http", lambda: Session()):
-            with pytest.raises(VendorUnavailableError, match="40101"):
-                ts._post({"api_name": "fund_daily"})
+        with mock.patch.object(ts, "_http", lambda: Session()), \
+                pytest.raises(VendorUnavailableError, match="40101"):
+            ts._post({"api_name": "fund_daily"})
 
 
 @pytest.mark.unit
@@ -161,6 +161,17 @@ class TestTushareEtfProfile(unittest.TestCase):
         # A NAV published after the run date must not be used.
         handlers["fund_nav"] = lambda **k: pd.DataFrame(
             [["515070.SH", "20261114", "20261115", "0.99", "1.0"]],
+            columns=["ts_code", "ann_date", "nav_date", "unit_nav", "accum_nav"],
+        )
+        with mock.patch.object(ts, "_api", _fake_api(handlers)):
+            out = ts.get_etf_profile("515070.SS", "2026-11-12")
+        assert "Latest published NAV" not in out
+
+    def test_a_nav_announced_after_the_run_is_not_used(self):
+        """The period can precede the run date while the announcement follows it."""
+        handlers = self._handlers()
+        handlers["fund_nav"] = lambda **k: pd.DataFrame(
+            [["515070.SH", "20261114", "20261110", "0.91", "1.2"]],
             columns=["ts_code", "ann_date", "nav_date", "unit_nav", "accum_nav"],
         )
         with mock.patch.object(ts, "_api", _fake_api(handlers)):

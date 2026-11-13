@@ -106,16 +106,14 @@ class TestCnStockData(unittest.TestCase):
         with _patched(
             eastmoney=_returns({"rc": 0, "data": None}),
             plain=lambda url, params: json.dumps({"data": {}}),
-        ):
-            with pytest.raises(NoMarketDataError):
-                get_stock_data("515070.SS", "2026-11-11", "2026-11-12")
+        ), pytest.raises(NoMarketDataError):
+            get_stock_data("515070.SS", "2026-11-11", "2026-11-12")
 
     def test_stale_frame_is_reported_as_no_data(self):
         # Inside the window but 23 days before the run date: the guard's case.
         stale = {"rc": 0, "data": {"klines": ["2026-10-20,1.0,1.0,1.0,1.0,10,1.0"]}}
-        with _patched(eastmoney=_returns(stale)):
-            with pytest.raises(NoMarketDataError) as ctx:
-                get_stock_data("515070.SS", "2026-10-01", "2026-11-12")
+        with _patched(eastmoney=_returns(stale)), pytest.raises(NoMarketDataError) as ctx:
+            get_stock_data("515070.SS", "2026-10-01", "2026-11-12")
         assert "stale" in str(ctx.value)
 
     def test_dates_are_forwarded_to_the_vendor(self):

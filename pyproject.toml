@@ -10,10 +10,10 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "cryptography>=42.0",
-    # Browser TLS fingerprint for the Eastmoney ETF vendor: its edge closes the
-    # connection for non-browser clients. The vendor still works through
-    # requests where the network does not fingerprint, so this is a runtime
-    # fallback rather than a hard requirement of the code path.
+    # Browser TLS fingerprint for the A-share vendors: Eastmoney's edge closes the
+    # connection for a non-browser ClientHello, so the ETF data path needs this in
+    # practice. The transport still degrades to requests where it is absent (a
+    # stripped install), but that path is the exception, not the design.
     "curl-cffi>=0.11",
     "langchain-core>=1.6.5",
     "langchain-anthropic>=1.7.4",

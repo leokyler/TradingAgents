@@ -17,20 +17,14 @@ from tradingagents.dataflows.vendors.alpha_vantage import (
     get_news as get_alpha_vantage_news,
     get_stock as get_alpha_vantage_stock,
 )
-from tradingagents.dataflows.vendors.eastmoney import (
-    get_etf_holdings as get_eastmoney_etf_holdings,
-    get_etf_index_fundamentals as get_eastmoney_etf_index_fundamentals,
-    get_etf_profile as get_eastmoney_etf_profile,
-)
 from tradingagents.dataflows.vendors.cn_market import (
     get_indicators as get_cn_market_indicators,
     get_stock_data as get_cn_market_stock,
 )
-
-from tradingagents.dataflows.vendors.tushare import (
-    get_etf_profile as get_tushare_etf_profile,
-    get_indicators as get_tushare_indicators,
-    get_stock_data as get_tushare_stock,
+from tradingagents.dataflows.vendors.eastmoney import (
+    get_etf_holdings as get_eastmoney_etf_holdings,
+    get_etf_index_fundamentals as get_eastmoney_etf_index_fundamentals,
+    get_etf_profile as get_eastmoney_etf_profile,
 )
 from tradingagents.dataflows.vendors.fred import get_macro_data as get_fred_macro_data
 from tradingagents.dataflows.vendors.polymarket import (
@@ -40,6 +34,11 @@ from tradingagents.dataflows.vendors.sec_edgar import (
     get_balance_sheet as get_sec_edgar_balance_sheet,
     get_cashflow as get_sec_edgar_cashflow,
     get_income_statement as get_sec_edgar_income_statement,
+)
+from tradingagents.dataflows.vendors.tushare import (
+    get_etf_profile as get_tushare_etf_profile,
+    get_indicators as get_tushare_indicators,
+    get_stock_data as get_tushare_stock,
 )
 from tradingagents.dataflows.vendors.yahoo.fundamentals import (
     get_balance_sheet as get_yfinance_balance_sheet,

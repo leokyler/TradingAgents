@@ -1,6 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.analysts.turn import take_turn
+from tradingagents.agents.asset_profiles import profile_for
 from tradingagents.agents.context import get_instrument_context_from_state, get_language_instruction
 from tradingagents.agents.tools import (
     get_global_news,
@@ -22,7 +23,7 @@ def create_news_analyst(llm):
     def news_analyst_node(state):
         current_date = state["trade_date"]
         asset_type = state.get("asset_type", "stock")
-        asset_label = {"stock": "company", "etf": "fund"}.get(asset_type, "asset")
+        asset_label = profile_for(asset_type).news_label
         instrument_context = get_instrument_context_from_state(state)
 
         system_message = (

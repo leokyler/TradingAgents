@@ -15,8 +15,9 @@ Endpoints used (all through the one JSON API at ``api.tushare.pro``):
     fund_basic   fund name and type
 
 Point-in-time discipline holds: every series is filtered to rows dated on or
-before the run, so a historical run reads what was published by then rather than
-today's snapshot. Prices are the vendor's unadjusted daily bars (fund dividends
+before the run, and fund NAV/share rows also by their announcement date, so a
+historical run reads what had been published by then rather than today's
+snapshot. Prices are the vendor's unadjusted daily bars (fund dividends
 are rare and the analysts compare across a few months), and volume is normalized
 to shares to match the other price vendors.
 
@@ -34,6 +35,7 @@ from datetime import datetime
 import pandas as pd
 import requests
 
+from tradingagents.dataflows import prices
 from tradingagents.dataflows.date_window import get_current_date
 from tradingagents.dataflows.errors import (
     NoMarketDataError,
@@ -42,18 +44,17 @@ from tradingagents.dataflows.errors import (
 )
 from tradingagents.dataflows.etf import is_a_share_etf
 from tradingagents.dataflows.indicators import (
-    INDICATOR_DESCRIPTIONS,
+    HISTORY_DAYS,
     format_indicator_window,
     indicator_values,
+    require_supported,
 )
 from tradingagents.dataflows.symbols import normalize_symbol
+from tradingagents.dataflows.vendors import transport
 
 _API_URL = "https://api.tushare.pro"
 _TOKEN_ENV = "TUSHARE_TOKEN"
 _TIMEOUT = 15.0
-
-# Enough history for the 200-day averages the analyst asks for.
-INDICATOR_HISTORY_DAYS = 400
 
 # A frame whose newest bar is older than this many calendar days is treated as
 # stale, matching the other price vendors; long holiday weekends fit.
@@ -61,18 +62,9 @@ MAX_STALE_DAYS = 10
 
 _SHARES_PER_LOT = 100
 
-_session: requests.Session | None = None
-
-
 def _http() -> requests.Session:
-    """A session that talks to the API directly, not through a proxy."""
-    global _session
-    if _session is None:
-        session = requests.Session()
-        session.trust_env = False
-        session.headers.update({"User-Agent": "Mozilla/5.0 (compatible; TradingAgents)"})
-        _session = session
-    return _session
+    """The API session: direct, not through a proxy."""
+    return transport.session()
 
 
 def _token() -> str:
@@ -176,54 +168,46 @@ def _price_frame(symbol: str, start_date: str, end_date: str) -> tuple[pd.DataFr
     return frame, end
 
 
-def _price_text(value: float) -> str:
-    text = f"{value:.6f}".rstrip("0")
-    whole, _, fraction = text.partition(".")
-    if len(fraction) < 2:
-        fraction = fraction.ljust(2, "0")
-    return f"{whole}.{fraction}"
-
-
 def get_stock_data(symbol: str, start_date: str, end_date: str) -> str:
     """Daily OHLCV as the CSV text the analyst reads, priced by Tushare."""
     canonical, _ = _ts_code(symbol)
     frame, _ = _price_frame(canonical, start_date, end_date)
-    lines = [
-        f"# Stock data for {canonical} from {start_date} to {end_date}",
-        f"# Total records: {len(frame)}",
-        "# Source: Tushare Pro daily bars (unadjusted)",
-        "",
-        "Date,Open,High,Low,Close,Volume",
-    ]
-    for row in frame.itertuples(index=False):
-        lines.append(
-            f"{row.Date:%Y-%m-%d},{_price_text(row.Open)},{_price_text(row.High)},"
-            f"{_price_text(row.Low)},{_price_text(row.Close)},{int(row.Volume)}"
-        )
-    return "\n".join(lines)
+    return prices.render_ohlcv(
+        frame, canonical, start_date, end_date, "Tushare Pro daily bars (unadjusted)"
+    )
 
 
 def get_indicators(symbol: str, indicator: str, as_of_date: str, look_back_days: int) -> str:
     """One indicator's dated window, computed from Tushare bars."""
-    if indicator not in INDICATOR_DESCRIPTIONS:
-        raise ValueError(
-            f"Indicator {indicator} is not supported. "
-            f"Please choose from: {list(INDICATOR_DESCRIPTIONS)}"
-        )
+    require_supported(indicator)
     canonical, _ = _ts_code(symbol)
     as_of = datetime.strptime(as_of_date, "%Y-%m-%d")
-    start = as_of - pd.Timedelta(days=INDICATOR_HISTORY_DAYS)
+    start = as_of - pd.Timedelta(days=HISTORY_DAYS)
     frame, _ = _price_frame(canonical, start.strftime("%Y-%m-%d"), as_of_date)
     values = indicator_values(frame, indicator)
     return format_indicator_window(indicator, as_of_date, look_back_days, values)
 
 
-def _latest(frame: pd.DataFrame, date_column: str, as_of: datetime) -> pd.Series | None:
+def _latest(
+    frame: pd.DataFrame, date_column: str, as_of: datetime, announced: str | None = None
+) -> pd.Series | None:
+    """The newest row dated on or before ``as_of`` — and, when the endpoint
+    reports one, announced on or before it too.
+
+    A value's ``nav_date``/``trade_date`` is the period it describes; ``ann_date``
+    is when the vendor published it. Filtering on the period alone would let a
+    historical run read a figure announced after the run date, which is exactly
+    the leak the point-in-time rule exists to prevent.
+    """
     if frame is None or frame.empty or date_column not in frame.columns:
         return None
     dates = pd.to_datetime(frame[date_column], format="%Y%m%d", errors="coerce")
     frame = frame.assign(_date=dates).dropna(subset=["_date"])
-    frame = frame[frame["_date"] <= as_of].sort_values("_date")
+    frame = frame[frame["_date"] <= as_of]
+    if announced and announced in frame.columns:
+        published = pd.to_datetime(frame[announced], format="%Y%m%d", errors="coerce")
+        frame = frame[published.isna() | (published <= as_of)]
+    frame = frame.sort_values("_date")
     if frame.empty:
         return None
     return frame.iloc[-1]
@@ -250,7 +234,7 @@ def get_etf_profile(ticker: str, as_of_date: str | None = None) -> str:
         start_date=(as_of - pd.Timedelta(days=365)).strftime("%Y%m%d"),
         end_date=as_of.strftime("%Y%m%d"),
     )
-    nav_row = _latest(nav_rows, "nav_date", as_of)
+    nav_row = _latest(nav_rows, "nav_date", as_of, announced="ann_date")
     shares_row = _latest(
         _api(
             "fund_share",
@@ -260,6 +244,7 @@ def get_etf_profile(ticker: str, as_of_date: str | None = None) -> str:
         ),
         "trade_date",
         as_of,
+        announced="ann_date",
     )
 
     name = canonical

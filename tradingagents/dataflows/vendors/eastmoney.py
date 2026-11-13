@@ -33,17 +33,13 @@ from __future__ import annotations
 import json
 import logging
 import re
-import threading
-import time
 from datetime import datetime
-from urllib.parse import urlparse
-
-import requests
 
 from tradingagents.dataflows.date_window import is_historical
 from tradingagents.dataflows.errors import NoMarketDataError, VendorUnavailableError
-from tradingagents.dataflows.etf import eastmoney_secid, etf_code, stock_secid
+from tradingagents.dataflows.etf import etf_code
 from tradingagents.dataflows.symbols import normalize_symbol
+from tradingagents.dataflows.vendors import transport
 
 logger = logging.getLogger(__name__)
 
@@ -60,19 +56,9 @@ _QUOTE_FIELDS = "f43,f44,f45,f46,f47,f48,f57,f58,f59,f60,f84,f116,f168,f169,f170
 # f162 PE (TTM), f167 PB, f127 sub-industry name, f58 name.
 _CONSTITUENT_FIELDS = "f57,f58,f116,f162,f167,f127"
 
+# A quote or a fund page that has not answered in five seconds is not going to:
+# the run has other work, and Eastmoney has other hosts.
 _TIMEOUT = 5.0
-
-# The edge closes the connection on bursts and keeps an IP in its penalty box for
-# a while (observed: a morning of runs, then hours of resets, then recovery). A
-# failed host is therefore skipped for a cooldown instead of being retried, and
-# requests to one host are spaced so a run does not build the burst in the first
-# place. Both are per process: a fresh run starts clean.
-_MIN_REQUEST_INTERVAL = 0.7
-_HOST_COOLDOWN_SECONDS = 600.0
-
-_host_state_lock = threading.Lock()
-_host_last_request_at: dict[str, float] = {}
-_host_blocked_until: dict[str, float] = {}
 
 # The quarterly disclosure lags the quarter end by a few weeks. Asking for the
 # quarter that just ended usually returns the previous one, which the parser
@@ -80,97 +66,37 @@ _host_blocked_until: dict[str, float] = {}
 _QUARTER_MONTHS = (3, 6, 9, 12)
 
 
-# Eastmoney's edge rejects non-browser TLS fingerprints: a plain requests or
-# http.client handshake completes, then the server closes without answering,
-# whatever headers are sent (observed on every variant). curl_cffi replays a
-# browser's ClientHello and gets through, so it is the preferred transport;
-# requests stays as the fallback for installs that do not ship curl_cffi.
-try:  # pragma: no cover - the import depends on the environment
-    from curl_cffi import requests as _curl_cffi
-    from curl_cffi.requests.errors import RequestsError as _CurlError
-except ImportError:  # pragma: no cover
-    _curl_cffi = None
-    _CurlError = None
-
-_TRANSPORT_ERRORS = (requests.RequestException,) + ((_CurlError,) if _CurlError else ())
-
-_SESSION: requests.Session | None = None
-
-
-def _session() -> requests.Session:
-    """A shared requests session that ignores proxy environment variables.
-
-    Eastmoney is a mainland-China endpoint: when a proxy is configured for the
-    rest of the internet (a common setup outside China and on developer
-    machines), routing these calls through it returns an empty reply rather than
-    an error. ``trust_env = False`` keeps the request direct.
-    """
-    global _SESSION
-    if _SESSION is None:
-        session = requests.Session()
-        session.trust_env = False
-        session.headers.update({"User-Agent": "Mozilla/5.0 (compatible; TradingAgents)"})
-        _SESSION = session
-    return _SESSION
-
-
-def _fetch(url: str, params: dict | None, headers: dict, timeout: float) -> str:
-    """One HTTP GET, browser-fingerprinted when curl_cffi is installed."""
-    if _curl_cffi is not None:
-        response = _curl_cffi.get(url, params=params, headers=headers,
-                                  timeout=timeout, impersonate="chrome")
-        if response.status_code >= 400:
-            raise VendorUnavailableError(
-                f"Eastmoney returned HTTP {response.status_code} for {url}"
-            )
-        return response.text
-    response = _session().get(url, params=params, headers=headers, timeout=timeout)
-    response.raise_for_status()
-    return response.text
-
-
 def _get(url: str, *, params: dict | None = None, referer: str | None = None) -> str:
-    """GET ``url`` and return its body, mapping transport failures to vendor errors.
+    """GET an Eastmoney endpoint through the shared transport.
 
-    Requests to one host are spaced, and a host whose connection itself failed
-    (timeout, reset, empty reply) is skipped for a cooldown: retrying a blocked
-    IP only extends the block, while the price vendor chain has other sources.
-    An HTTP error answer is not evidence about the host, so it opens no breaker.
+    Spacing, the per-host cooldown and the browser fingerprint all live in
+    ``vendors.transport`` because the CN price vendor hits the same edge.
     """
-    headers = {"Referer": referer} if referer else {}
-    host = urlparse(url).netloc
-    now = time.monotonic()
-    with _host_state_lock:
-        blocked_until = _host_blocked_until.get(host, 0.0)
-        if now < blocked_until:
-            raise VendorUnavailableError(
-                f"Eastmoney host {host} recently dropped requests; skipping it "
-                f"for another {blocked_until - now:.0f}s"
-            )
-        wait = _MIN_REQUEST_INTERVAL - (now - _host_last_request_at.get(host, 0.0))
-        _host_last_request_at[host] = now + max(wait, 0.0)
-    if wait > 0:
-        time.sleep(wait)
+    return transport.get(url, params=params, referer=referer, timeout=_TIMEOUT, browser=True)
 
-    last: Exception | None = None
-    # One retry: the vendor intermittently drops a connection mid-run, and a
-    # single re-request covers it without hiding a real outage.
-    for attempt in range(2):
-        try:
-            body = _fetch(url, params, headers, _TIMEOUT)
-        except _TRANSPORT_ERRORS + (VendorUnavailableError,) as exc:
-            last = exc
-            if attempt == 0:
-                time.sleep(0.3)
-            continue
-        with _host_state_lock:
-            _host_blocked_until[host] = 0.0
-        return body
 
-    if last is not None and isinstance(last, _TRANSPORT_ERRORS):
-        with _host_state_lock:
-            _host_blocked_until[host] = time.monotonic() + _HOST_COOLDOWN_SECONDS
-    raise VendorUnavailableError(f"Eastmoney request failed for {url}: {last}") from last
+def eastmoney_secid(ticker: str) -> str | None:
+    """Eastmoney's market-qualified id (``1.510300`` / ``0.159919``).
+
+    Eastmoney prefixes Shanghai with ``1`` and Shenzhen with ``0``; the suffix
+    of the Yahoo symbol is what decides, so no lookup is needed.
+    """
+    canonical = normalize_symbol(ticker)
+    if canonical.endswith(".SS"):
+        return f"1.{canonical[:-3]}"
+    if canonical.endswith(".SZ"):
+        return f"0.{canonical[:-3]}"
+    return None
+
+
+def stock_secid(code: str) -> str:
+    """Eastmoney id for an A-share constituent, from its bare 6-digit code.
+
+    A disclosed holding carries no exchange suffix, so the code's own prefix
+    decides the market: Shanghai listings start with 5 (funds), 6 (main board)
+    or 9 (B shares); Shenzhen listings start with 0, 1 or 3.
+    """
+    return f"1.{code}" if code[:1] in ("5", "6", "9") else f"0.{code}"
 
 
 def _guard(ticker: str) -> str:
@@ -219,10 +145,7 @@ def _withhold_if_historical(canonical: str, as_of_date: str | None, what: str) -
 def _quote(secid: str, fields: str = _QUOTE_FIELDS) -> dict:
     body = _get(_QUOTE_URL, params={"secid": secid, "fltt": "2", "invt": "2",
                                     "fields": fields})
-    try:
-        data = json.loads(body).get("data") or {}
-    except ValueError as exc:
-        raise VendorUnavailableError(f"Eastmoney returned unparseable JSON for {secid}") from exc
+    data = transport.json_body(body, "Eastmoney").get("data") or {}
     if not data:
         raise NoMarketDataError(secid, secid, "no quote returned")
     return data
@@ -342,7 +265,7 @@ def _holdings_rows(code: str, as_of_date: str | None = None, limit: int = 10,
     tables = re.findall(r"<table[^>]*>(.*?)</table>", body, re.S)
 
     entries = []
-    for header, table in zip(headers, tables):
+    for header, table in zip(headers, tables, strict=False):
         report_match = re.search(r"截止至：<font[^>]*>([\d-]+)</font>", header)
         quarter_match = re.search(r"(\d{4}年\d季度)", header)
         entries.append({

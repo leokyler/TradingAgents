@@ -147,6 +147,16 @@ def detect_asset_type(ticker: str) -> AssetType:
     return AssetType.STOCK
 
 
+# The analysts each asset type cannot use. A fund files no company statements and
+# has no US retail cashtags; a crypto asset has neither filings nor a fund; a
+# stock has no fund to describe.
+_ANALYSTS_UNAVAILABLE: dict[AssetType, frozenset[AnalystType]] = {
+    AssetType.STOCK: frozenset({AnalystType.ETF}),
+    AssetType.ETF: frozenset({AnalystType.FUNDAMENTALS, AnalystType.SOCIAL}),
+    AssetType.CRYPTO: frozenset({AnalystType.FUNDAMENTALS, AnalystType.ETF}),
+}
+
+
 def filter_analysts_for_asset_type(
     analysts: list[AnalystType], asset_type: AssetType
 ) -> list[AnalystType]:
@@ -154,21 +164,11 @@ def filter_analysts_for_asset_type(
 
     A fund has no company filings and no US retail cashtags, so an ETF run trades
     both for the ETF analyst; a stock run never offers the ETF analyst, and a
-    crypto run offers neither.
+    crypto run offers neither. The table is the whole rule: a new asset type is a
+    new row, not another branch here.
     """
-    if asset_type == AssetType.ETF:
-        return [
-            analyst
-            for analyst in analysts
-            if analyst not in (AnalystType.FUNDAMENTALS, AnalystType.SOCIAL)
-        ]
-    if asset_type == AssetType.CRYPTO:
-        return [
-            analyst
-            for analyst in analysts
-            if analyst not in (AnalystType.FUNDAMENTALS, AnalystType.ETF)
-        ]
-    return [analyst for analyst in analysts if analyst != AnalystType.ETF]
+    unavailable = _ANALYSTS_UNAVAILABLE.get(asset_type, frozenset())
+    return [analyst for analyst in analysts if analyst not in unavailable]
 
 
 def _matching_choice(options, default):
