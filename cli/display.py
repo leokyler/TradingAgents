@@ -147,12 +147,13 @@ class MessageBuffer:
                 "sentiment_report": "Social Sentiment",
                 "news_report": "News Analysis",
                 "fundamentals_report": "Fundamentals Analysis",
+                "etf_report": "ETF Analysis",
                 "investment_plan": "Research Team Decision",
                 "trader_investment_plan": "Trading Team Plan",
                 "final_trade_decision": "Portfolio Management Decision",
             }
             self.current_report = (
-                f"### {section_titles[latest_section]}\n{latest_content}"
+                f"### {section_titles.get(latest_section, latest_section)}\n{latest_content}"
             )
 
 
