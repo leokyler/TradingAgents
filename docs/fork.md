@@ -42,7 +42,7 @@ Every entry below is a deliberate edit to an upstream file, and the list is mean
 | `agents/tools.py` | the two error branches try the routed vendor first | the tool's behaviour changed, not its plumbing |
 | `llm_clients/factory.py` | the effort-provider tuple gains a member; a tier's effort overrides the shared one | a one-tuple edit and a default cascade |
 | `llm_clients/openai_client.py` | one condition: the native-OpenAI model-name gate skips the gateway | the gateway accepts effort levels native OpenAI would reject |
-| `graph/trading_graph.py` | `record_decision` runs the gate; the state log carries `etf_report` | the gate must sit on the path both the CLI and the API share |
+| `graph/trading_graph.py` | `record_decision` runs the gate; the state log carries `etf_report`; one warning when a fund run selects no ETF analyst | the gate must sit on the path both the CLI and the API share |
 | `cli/{main,display}.py` | one help string, and the analyst registries' entries | additive, listed for completeness |
 | `default_config.py` | new keys only (`evidence_gate`, the tier efforts, `etf_data`) | purely additive |
 

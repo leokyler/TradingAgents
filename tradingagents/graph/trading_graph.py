@@ -393,9 +393,27 @@ class TradingAgentsGraph:
             rating=rating,
         )
 
+    def _warn_if_asset_type_has_no_analyst(self, asset_type: str) -> None:
+        """Say so when a run is framed as a fund but collects no fund-level data.
+
+        ``selected_analysts`` decides which nodes exist; ``asset_type`` decides how
+        the prompts frame the instrument. The CLI derives both from the ticker, so
+        a mismatch is a programmatic caller's: the prompts describe a fund while
+        the only node that fetches profile, holdings and basket valuation is
+        absent. Skipping that analyst on purpose is legal, so this states the
+        consequence once instead of refusing the run.
+        """
+        if asset_type == "etf" and "etf" not in self.selected_analysts:
+            logger.warning(
+                "asset_type='etf' but no ETF analyst is selected: the prompts describe a "
+                "fund while no fund-level data (profile, holdings, basket valuation) is "
+                "collected. Add 'etf' to selected_analysts to get it."
+            )
+
     def _run_graph(self, company_name, trade_date, asset_type: str = "stock",
                    checkpoint_thread_id: str | None = None, portfolio=None):
         """Execute the graph and write the resulting state to disk and memory log."""
+        self._warn_if_asset_type_has_no_analyst(asset_type)
         init_agent_state = self.create_run_state(company_name, trade_date, asset_type, portfolio)
         args = self.propagator.get_graph_args()
 

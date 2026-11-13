@@ -11,6 +11,7 @@ from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.dataflows.etf import etf_code, is_a_share_etf
 from tradingagents.dataflows.vendors import eastmoney
 from tradingagents.dataflows.vendors.eastmoney import eastmoney_secid, stock_secid
+from tradingagents.graph.trading_graph import TradingAgentsGraph
 
 # The Eastmoney fixtures describe this date. Pinning "today" keeps them honest:
 # a day later every present-day snapshot is withheld as historical and the
@@ -299,3 +300,29 @@ class TestEtfAnalystSelection(unittest.TestCase):
         crypto_analysts = filter_analysts_for_asset_type(list(AnalystType), AssetType.CRYPTO)
         self.assertNotIn(AnalystType.ETF, crypto_analysts)
         self.assertNotIn(AnalystType.FUNDAMENTALS, crypto_analysts)
+
+
+@pytest.mark.unit
+class TestFundRunShapeWarning(unittest.TestCase):
+    """The two halves of an ETF run are named separately, so say when they disagree."""
+
+    def _graph(self, selected):
+        graph = object.__new__(TradingAgentsGraph)
+        graph.selected_analysts = tuple(selected)
+        return graph
+
+    def test_etf_asset_type_without_the_etf_analyst_warns(self):
+        graph = self._graph(["market", "news"])
+        with self.assertLogs("tradingagents.graph.trading_graph", level="WARNING") as logs:
+            graph._warn_if_asset_type_has_no_analyst("etf")
+        self.assertIn("no fund-level data", "\n".join(logs.output))
+
+    def test_a_fund_run_that_selects_the_etf_analyst_is_quiet(self):
+        graph = self._graph(["market", "etf", "news"])
+        with self.assertNoLogs("tradingagents.graph.trading_graph", level="WARNING"):
+            graph._warn_if_asset_type_has_no_analyst("etf")
+
+    def test_a_stock_run_is_quiet(self):
+        graph = self._graph(["market", "news"])
+        with self.assertNoLogs("tradingagents.graph.trading_graph", level="WARNING"):
+            graph._warn_if_asset_type_has_no_analyst("stock")

@@ -75,6 +75,18 @@ tradingagents --ticker 510300.SS --date 2026-11-12 --analysts market,etf,news
 
 The analysis CLI detects the ETF from the ticker and announces the type when it is not a stock. `--analysts` skips the analyst prompt; omit it to choose from the menu. `tradingagents backtest` does not detect the type from the ticker, so pass `--asset-type etf` for an ETF grid.
 
+From Python, both halves are named separately and neither implies the other: `selected_analysts` decides which nodes the graph has, and the `asset_type` passed to `propagate` decides how the prompts frame the instrument.
+
+```python
+from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+ta = TradingAgentsGraph(selected_analysts=["market", "etf", "news"], config=DEFAULT_CONFIG.copy())
+state, decision = ta.propagate("510300.SS", "2026-11-14", asset_type="etf")
+```
+
+Passing the asset type without selecting the ETF analyst leaves the prompts describing a fund while nothing fetches the profile, holdings or basket valuation; the run logs a warning rather than failing, since skipping that analyst on purpose is legal. Selecting the analyst without passing the asset type runs the stock framing around whatever the ETF analyst collected.
+
 The date above is in the past, so this particular run gets the historical treatment below: the Eastmoney profile and basket valuation are withheld, and the report says so rather than showing present-day figures. Use today's date to see the live blocks.
 
 ## Point-in-time rules
