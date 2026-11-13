@@ -184,9 +184,7 @@ For Azure OpenAI, copy `.env.enterprise.example` to `.env.enterprise` and fill i
 
 To run on your ChatGPT Plus or Pro plan instead of an API key, choose "Subscription" in the CLI's provider menu, or set `llm_provider: "chatgpt"`. Sign in once with `tradingagents login chatgpt`: it prints an address to open in your browser, which returns to this machine on `127.0.0.1`. When the browser runs on another machine, or TradingAgents runs in Docker (`docker compose run --rm tradingagents login chatgpt`), paste the address the browser ends up on. The sign-in is kept in `~/.tradingagents/chatgpt-auth.json`, and `tradingagents logout chatgpt` revokes it. Runs count toward your plan's usage limits, and the plan does not accept `temperature` or `max_tokens`.
 
-OpenCode Go is a subscription gateway that speaks the OpenAI API: choose "OpenCode Go" in the provider menu or set `llm_provider: "opencode-go"`, and set `OPENCODE_GO_API_KEY` from the Console's Settings → Service accounts. Its docs ask every client to do two things a plain OpenAI client does not: identify itself by name rather than as a generic SDK, and send a stable `x-opencode-session` id per conversation so requests route consistently and prompt caching can hit. The provider sends both, generating the session id once per process; set `OPENCODE_GO_SESSION_ID` to keep it across processes, which a scheduled job wants so separate runs share one conversation. The official base URL is `https://opencode.ai/inference/go/openai/v1`; `backend_url` can pin any other endpoint the gateway offers.
-
-Reasoning depth is settable per tier, because the two tiers serve different jobs: `TRADINGAGENTS_QUICK_THINK_EFFORT` covers the analysts, the debate, the trader and the risk team, and `TRADINGAGENTS_DEEP_THINK_EFFORT` covers the Research and Portfolio Managers. A tier that names none keeps `openai_reasoning_effort`, and when that is unset too nothing is sent, so the model runs at its own default. The gateway advertises the levels each model accepts (`/v1/models` → `capabilities.reasoning.effort`): DeepSeek V4.1 Flash and GLM-5.3 take low/high/max, DeepSeek V4 Pro takes high/max. Effort travels to OpenCode Go and native OpenAI only; other compatible endpoints never see the field.
+For an OpenCode Go subscription, see [`docs/opencode-go.md`](docs/opencode-go.md) for provider selection, the session header and per-tier reasoning depth.
 
 For AWS Bedrock, install the extra with `pip install ".[bedrock]"`, set `llm_provider: "bedrock"`, configure AWS credentials (environment variables, `~/.aws/credentials`, or an IAM role) and `AWS_DEFAULT_REGION`, and use a Bedrock model ID, e.g. `us.anthropic.claude-opus-5-5`.
 
@@ -234,23 +232,7 @@ TradingAgents works with any market Yahoo Finance covers, using the exchange-suf
 
 ### Exchange-traded funds
 
-An A-share ETF (Shanghai `.SS` fund codes `51xxxx`/`56xxxx`/`58xxxx`, Shenzhen `.SZ` `159xxx`) is detected automatically: the run switches to `asset_type="etf"` and the default analyst team becomes **Market + ETF + News**. The fundamentals and sentiment analysts are dropped there, because a fund files no company statements and has no US retail cashtag stream.
-
-For A-share price data, point the price categories at the keyless `cn_market` vendor: `TRADINGAGENTS_DATA_VENDORS='{"core_stock_apis": "cn_market,yfinance", "technical_indicators": "cn_market,yfinance"}'`. It serves daily bars and indicators from public China endpoints (Eastmoney, then Tencent, then Sina) and falls through to Yahoo for anything else, so a blocked or throttled Yahoo does not cost an A-share run its prices. With a `TUSHARE_TOKEN`, add the keyed `tushare` vendor to the same chains (`"cn_market,tushare,yfinance"`) and to `etf_data` (`"tushare,eastmoney"`) for exchange-sourced NAV and shares outstanding instead of scraped fund pages (holdings and basket valuation still come from Eastmoney until its Tushare equivalent lands).
-
-The ETF analyst reads Eastmoney's public fund endpoints (no key), which is where the fund-level facts live — Yahoo has no fund data for Chinese ETFs:
-
-- profile: price, shares outstanding, fund size, latest published NAV and the premium/discount it implies, turnover
-- disclosed holdings: the newest quarterly top holdings and the weight they cover (bond and money-market funds fall back to their bond table; a commodity fund discloses neither and says so)
-- basket valuation: capital-weighted PE/PB/ROE over the disclosed constituents plus the industry weights they imply, with the coverage stated (a top-10 aggregate is not the index). The industry read is not a footnote: the ETF report is injected into the bull/bear and risk debates, so "what is this fund actually long" becomes an argument.
-
-```bash
-tradingagents --ticker 510300.SS --date 2026-11-12 --analysts market,etf,news
-```
-
-Point-in-time rules still hold: a historical run gets the holdings quarter that had closed by its date, and the live profile and present-day valuation multiples are withheld rather than shown. The ETF path covers A-share listed funds only; a US ETF (e.g. `SPY`) stays on the stock pipeline and uses Yahoo's fund data through the market/news analysts.
-
-Independently of the asset type, a run that cannot read a price series for its instrument is published as **REVIEW** rather than Buy/Hold/Sell: the debate always produces an opinion, and the evidence gate refuses to present one that no price data supports. Set `evidence_gate: false` (or `TRADINGAGENTS_EVIDENCE_GATE=0`) to turn it off.
+An A-share ETF is detected from its fund code and runs a fund-aware analyst team, with A-share vendor chains configured by `TRADINGAGENTS_DATA_VENDORS`: see [`docs/a-share-etf.md`](docs/a-share-etf.md). Independently of the asset type, a run that cannot read a price series for its instrument is published as **REVIEW** rather than Buy/Hold/Sell; the evidence gate is in [`docs/a-share-etf.md`](docs/a-share-etf.md#the-evidence-gate).
 
 <p align="center">
   <img src="assets/cli/cli_init.png" width="100%" style="display: inline-block; margin: 0 2%;">
