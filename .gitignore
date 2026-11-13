@@ -223,8 +223,8 @@ __marimo__/
 reports/
 
 # Local benchmark harness output (logs, runs, cache) — reproducible, not source
-.bench/logs/
-.bench/results/
-.bench/cache/
-.bench/memory/
-.bench/uv-cache/
+bench/logs/
+bench/results/
+bench/cache/
+bench/memory/
+bench/uv-cache/

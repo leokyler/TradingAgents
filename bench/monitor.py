@@ -9,6 +9,7 @@ Usage: monitor.py --out DIR --label NAME -- <command> [args...]
 """
 
 import argparse
+import contextlib
 import datetime as dt
 import json
 import os
@@ -49,7 +50,7 @@ def read_rss_bytes(pid):
 def read_pss_bytes(pid):
     try:
         pss = 0
-        with open(f"/proc/{pid}/smaps_rollup", "r", encoding="utf-8") as f:
+        with open(f"/proc/{pid}/smaps_rollup", encoding="utf-8") as f:
             for line in f:
                 if line.startswith("Pss:"):
                     pss = int(line.split()[1]) * 1024
@@ -62,7 +63,7 @@ def read_pss_bytes(pid):
 def read_io(pid):
     try:
         vals = {}
-        with open(f"/proc/{pid}/io", "r", encoding="utf-8") as f:
+        with open(f"/proc/{pid}/io", encoding="utf-8") as f:
             for line in f:
                 key, _, val = line.partition(":")
                 vals[key.strip()] = int(val)
@@ -74,7 +75,7 @@ def read_io(pid):
 def read_net():
     rx = tx = 0
     try:
-        with open("/proc/net/dev", "r", encoding="utf-8") as f:
+        with open("/proc/net/dev", encoding="utf-8") as f:
             for line in f:
                 if ":" not in line:
                     continue
@@ -92,7 +93,7 @@ def read_net():
 def read_meminfo():
     info = {}
     try:
-        with open("/proc/meminfo", "r", encoding="utf-8") as f:
+        with open("/proc/meminfo", encoding="utf-8") as f:
             for line in f:
                 key, _, val = line.partition(":")
                 info[key.strip()] = val.strip()
@@ -153,7 +154,9 @@ def main():
     )
     pgid = proc.pid
 
-    logf = open(log_path, "w", encoding="utf-8", errors="replace", buffering=1)
+    # Both handles outlive this block by design: the reader thread writes the
+    # log for the whole run, and CSV rows are appended until the run ends.
+    logf = open(log_path, "w", encoding="utf-8", errors="replace", buffering=1)  # noqa: SIM115
 
     def pump():
         for raw in iter(proc.stdout.readline, b""):
@@ -161,7 +164,7 @@ def main():
     reader = threading.Thread(target=pump, daemon=True)
     reader.start()
 
-    csvf = open(csv_path, "w", encoding="utf-8", buffering=1)
+    csvf = open(csv_path, "w", encoding="utf-8", buffering=1)  # noqa: SIM115
     csvf.write(
         "t,rss_mb,pss_mb,threads,nprocs,cpu_pct,cpu_pct_machine,"
         "disk_read_mb,disk_write_mb,sys_read_mb,sys_write_mb,net_rx_mb,net_tx_mb,mem_available_mb\n"
@@ -182,10 +185,8 @@ def main():
     stop = threading.Event()
 
     def on_term(signum, frame):
-        try:
+        with contextlib.suppress(OSError):
             os.killpg(pgid, signal.SIGTERM)
-        except OSError:
-            pass
         stop.set()
 
     for sig in (signal.SIGINT, signal.SIGTERM):

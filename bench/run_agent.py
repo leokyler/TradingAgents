@@ -13,43 +13,10 @@ import sys
 import threading
 import time
 
-# The venv also has a stale site-packages copy of this project; put the working
-# tree first so the benchmark measures the code being edited.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import cli.run as runmod
-
 _handlers = []
 _calls = []          # (start_monotonic, end_monotonic)
 _open_starts = []
 _lock = threading.Lock()
-_orig = runmod.StatsCallbackHandler
-
-
-class TrackingStats(_orig):
-    def __init__(self, *a, **k):
-        super().__init__(*a, **k)
-        _handlers.append(self)
-
-    def on_chat_model_start(self, *a, **k):
-        with _lock:
-            _open_starts.append(time.monotonic())
-        return super().on_chat_model_start(*a, **k)
-
-    def on_llm_start(self, *a, **k):
-        with _lock:
-            _open_starts.append(time.monotonic())
-        return super().on_llm_start(*a, **k)
-
-    def on_llm_end(self, *a, **k):
-        with _lock:
-            start = _open_starts.pop() if _open_starts else None
-            if start is not None:
-                _calls.append(time.monotonic() - start)
-        return super().on_llm_end(*a, **k)
-
-
-runmod.StatsCallbackHandler = TrackingStats
 
 
 def _dump():
@@ -74,9 +41,40 @@ def _dump():
     print("\n[bench] " + json.dumps(out), flush=True)
 
 
-atexit.register(_dump)
+def main():
+    # The venv also has a stale site-packages copy of this project; put the
+    # working tree first so the benchmark measures the code being edited.
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cli.main import app
+    import cli.run as runmod
+    from cli.main import app
+
+    class TrackingStats(runmod.StatsCallbackHandler):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            _handlers.append(self)
+
+        def on_chat_model_start(self, *a, **k):
+            with _lock:
+                _open_starts.append(time.monotonic())
+            return super().on_chat_model_start(*a, **k)
+
+        def on_llm_start(self, *a, **k):
+            with _lock:
+                _open_starts.append(time.monotonic())
+            return super().on_llm_start(*a, **k)
+
+        def on_llm_end(self, *a, **k):
+            with _lock:
+                start = _open_starts.pop() if _open_starts else None
+                if start is not None:
+                    _calls.append(time.monotonic() - start)
+            return super().on_llm_end(*a, **k)
+
+    runmod.StatsCallbackHandler = TrackingStats
+    atexit.register(_dump)
+    app()
+
 
 if __name__ == "__main__":
-    app()
+    main()
