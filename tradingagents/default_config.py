@@ -194,8 +194,8 @@ def build_default_config() -> dict:
         # routed to vendors you didn't choose. For ordered fallback, list several,
         # e.g. "yfinance,alpha_vantage". "default" uses all available vendors.
         "data_vendors": {
-            "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance, cn_market
-            "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance, cn_market
+            "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance, cn_market, tushare
+            "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance, cn_market, tushare
             # Statements come from SEC EDGAR as filed (US filers), then Yahoo; the
         # overview and insider tools, which SEC EDGAR does not serve, from Yahoo.
         "fundamental_data": "sec_edgar,yfinance",  # Options: sec_edgar, alpha_vantage, yfinance
@@ -204,7 +204,7 @@ def build_default_config() -> dict:
             "prediction_markets": "polymarket",  # Options: polymarket (keyless)
             # Fund-level data for A-share ETFs (profile, holdings, basket
             # valuation). Yahoo has no fund data for Chinese ETFs.
-            "etf_data": "eastmoney",             # Options: eastmoney (keyless)
+            "etf_data": "eastmoney",             # Options: eastmoney (keyless), tushare (token)
         },
         # Tool-level configuration (takes precedence over category-level)
         "tool_vendors": {

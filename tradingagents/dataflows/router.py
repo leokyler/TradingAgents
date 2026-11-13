@@ -26,6 +26,12 @@ from tradingagents.dataflows.vendors.cn_market import (
     get_indicators as get_cn_market_indicators,
     get_stock_data as get_cn_market_stock,
 )
+
+from tradingagents.dataflows.vendors.tushare import (
+    get_etf_profile as get_tushare_etf_profile,
+    get_indicators as get_tushare_indicators,
+    get_stock_data as get_tushare_stock,
+)
 from tradingagents.dataflows.vendors.fred import get_macro_data as get_fred_macro_data
 from tradingagents.dataflows.vendors.polymarket import (
     get_prediction_markets as get_polymarket_prediction_markets,
@@ -117,12 +123,14 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
         "cn_market": get_cn_market_stock,
+        "tushare": get_tushare_stock,
     },
     # technical_indicators
     "get_indicators": {
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
         "cn_market": get_cn_market_indicators,
+        "tushare": get_tushare_indicators,
     },
     # fundamental_data
     "get_fundamentals": {
@@ -168,6 +176,7 @@ VENDOR_METHODS = {
     # etf_data
     "get_etf_profile": {
         "eastmoney": get_eastmoney_etf_profile,
+        "tushare": get_tushare_etf_profile,
     },
     "get_etf_holdings": {
         "eastmoney": get_eastmoney_etf_holdings,
