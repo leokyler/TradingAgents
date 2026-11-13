@@ -7,8 +7,19 @@ import pytest
 
 from tradingagents.agents.context import build_instrument_context
 from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.dataflows import date_window
 from tradingagents.dataflows.etf import eastmoney_secid, etf_code, is_a_share_etf, stock_secid
 from tradingagents.dataflows.vendors import eastmoney
+
+# The Eastmoney fixtures describe this date. Pinning "today" keeps them honest:
+# a day later every present-day snapshot is withheld as historical and the
+# profile assertions would read the withheld notice instead.
+FIXTURE_TODAY = "2026-11-12"
+
+
+@pytest.fixture(autouse=True)
+def _pin_today(monkeypatch):
+    monkeypatch.setattr(date_window, "get_current_date", lambda: FIXTURE_TODAY)
 
 
 @pytest.mark.unit
