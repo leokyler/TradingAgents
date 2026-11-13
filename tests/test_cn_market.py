@@ -159,3 +159,16 @@ class TestCnIndicators(unittest.TestCase):
     def test_indicators_reject_a_foreign_symbol(self):
         with pytest.raises(NoMarketDataError):
             get_indicators("AAPL", "rsi", "2026-11-12", 5)
+
+
+@pytest.mark.unit
+def test_bar_count_reaches_back_from_today_not_the_run_end():
+    """A historical run must ask a latest-N endpoint for every bar since its start."""
+    from datetime import datetime
+
+    from tradingagents.dataflows.date_window import get_current_date
+
+    start = datetime.strptime("2026-01-01", "%Y-%m-%d")
+    today = datetime.strptime(get_current_date(), "%Y-%m-%d")
+    assert cn_market._bar_count(start) >= (today - start).days
+    assert cn_market._bar_count(today) >= 40

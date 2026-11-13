@@ -117,9 +117,14 @@ def _to_frame(rows) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
-def _bar_count(start: datetime, end: datetime) -> int:
-    """How many trailing daily bars to ask a latest-N endpoint for."""
-    days = max((end - start).days + 15, 40)
+def _bar_count(start: datetime) -> int:
+    """How many trailing daily bars to ask a latest-N endpoint for.
+
+    The latest-N endpoints count back from *today*, not from the run's end date,
+    so a historical run must still ask for everything between its start and now.
+    """
+    today = datetime.strptime(get_current_date(), "%Y-%m-%d")
+    days = max((today - start).days + 15, 40)
     return min(days, 2500)
 
 
@@ -149,7 +154,7 @@ def _eastmoney_klines(canonical: str, secid: str, start: datetime, end: datetime
 def _tencent_klines(canonical: str, symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
     body = _plain_get(
         "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
-        {"param": f"{symbol},day,,,{_bar_count(start, end)},qfq"},
+        {"param": f"{symbol},day,,,{_bar_count(start)},qfq"},
     )
     payload = _load_json(body, "Tencent")
     node = (payload.get("data") or {}).get(symbol) or {}
@@ -163,7 +168,7 @@ def _tencent_klines(canonical: str, symbol: str, start: datetime, end: datetime)
 def _sina_klines(canonical: str, symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
     body = _plain_get(
         "https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData",
-        {"symbol": symbol, "scale": "240", "ma": "no", "datalen": str(_bar_count(start, end))},
+        {"symbol": symbol, "scale": "240", "ma": "no", "datalen": str(_bar_count(start))},
     )
     rows = _load_json(body, "Sina")
     if not isinstance(rows, list):
