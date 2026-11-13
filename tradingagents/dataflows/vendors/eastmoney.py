@@ -33,8 +33,10 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
 from datetime import datetime
+from urllib.parse import urlparse
 
 import requests
 
@@ -58,7 +60,19 @@ _QUOTE_FIELDS = "f43,f44,f45,f46,f47,f48,f57,f58,f59,f60,f84,f116,f168,f169,f170
 # f162 PE (TTM), f167 PB, f127 sub-industry name, f58 name.
 _CONSTITUENT_FIELDS = "f57,f58,f116,f162,f167,f127"
 
-_TIMEOUT = 10.0
+_TIMEOUT = 5.0
+
+# The edge closes the connection on bursts and keeps an IP in its penalty box for
+# a while (observed: a morning of runs, then hours of resets, then recovery). A
+# failed host is therefore skipped for a cooldown instead of being retried, and
+# requests to one host are spaced so a run does not build the burst in the first
+# place. Both are per process: a fresh run starts clean.
+_MIN_REQUEST_INTERVAL = 0.7
+_HOST_COOLDOWN_SECONDS = 600.0
+
+_host_state_lock = threading.Lock()
+_host_last_request_at: dict[str, float] = {}
+_host_blocked_until: dict[str, float] = {}
 
 # The quarterly disclosure lags the quarter end by a few weeks. Asking for the
 # quarter that just ended usually returns the previous one, which the parser
@@ -116,18 +130,46 @@ def _fetch(url: str, params: dict | None, headers: dict, timeout: float) -> str:
 
 
 def _get(url: str, *, params: dict | None = None, referer: str | None = None) -> str:
-    """GET ``url`` and return its body, mapping transport failures to vendor errors."""
+    """GET ``url`` and return its body, mapping transport failures to vendor errors.
+
+    Requests to one host are spaced, and a host whose connection itself failed
+    (timeout, reset, empty reply) is skipped for a cooldown: retrying a blocked
+    IP only extends the block, while the price vendor chain has other sources.
+    An HTTP error answer is not evidence about the host, so it opens no breaker.
+    """
     headers = {"Referer": referer} if referer else {}
+    host = urlparse(url).netloc
+    now = time.monotonic()
+    with _host_state_lock:
+        blocked_until = _host_blocked_until.get(host, 0.0)
+        if now < blocked_until:
+            raise VendorUnavailableError(
+                f"Eastmoney host {host} recently dropped requests; skipping it "
+                f"for another {blocked_until - now:.0f}s"
+            )
+        wait = _MIN_REQUEST_INTERVAL - (now - _host_last_request_at.get(host, 0.0))
+        _host_last_request_at[host] = now + max(wait, 0.0)
+    if wait > 0:
+        time.sleep(wait)
+
     last: Exception | None = None
     # One retry: the vendor intermittently drops a connection mid-run, and a
     # single re-request covers it without hiding a real outage.
     for attempt in range(2):
         try:
-            return _fetch(url, params, headers, _TIMEOUT)
+            body = _fetch(url, params, headers, _TIMEOUT)
         except _TRANSPORT_ERRORS + (VendorUnavailableError,) as exc:
             last = exc
             if attempt == 0:
                 time.sleep(0.3)
+            continue
+        with _host_state_lock:
+            _host_blocked_until[host] = 0.0
+        return body
+
+    if last is not None and isinstance(last, _TRANSPORT_ERRORS):
+        with _host_state_lock:
+            _host_blocked_until[host] = time.monotonic() + _HOST_COOLDOWN_SECONDS
     raise VendorUnavailableError(f"Eastmoney request failed for {url}: {last}") from last
 
 
