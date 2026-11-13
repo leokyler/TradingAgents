@@ -136,6 +136,36 @@ Install the package and its dependencies (`uv pip install .` with uv):
 pip install .
 ```
 
+### Install as a uv tool
+
+To get just the `tradingagents` command, with no environment to activate, let
+[uv](https://docs.astral.sh/uv/guides/tools/) build the package into its own
+environment and put a launcher on your `PATH`:
+
+```bash
+uv tool install . --python 3.13
+tradingagents          # any directory, no source/activate
+```
+
+A tool install is a snapshot of this checkout: after pulling, refresh it with
+`uv tool upgrade tradingagents`, which rebuilds it and re-resolves its
+dependencies. While editing the code, use `uv tool install -e .` instead, so
+changes apply without reinstalling.
+
+Without a clone, install straight from a repository, with an optional branch,
+tag or commit after the `@`:
+
+```bash
+uv tool install "git+https://github.com/<owner>/<repo>@<branch-or-tag>" --python 3.13
+```
+
+Extras work the same way (`uv tool install ".[bedrock]" --python 3.13`), `uvx
+--from . tradingagents` runs it once without installing, and `uv tool uninstall
+tradingagents` removes it.
+
+The `.env` file is read from the directory the command is started in, so run it
+from the checkout, or export the `TRADINGAGENTS_*` variables and API keys.
+
 ### Docker
 
 Alternatively, run with Docker:
