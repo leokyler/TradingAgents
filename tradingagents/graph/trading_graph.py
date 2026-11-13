@@ -359,9 +359,29 @@ class TradingAgentsGraph:
         with run_config(self.config):
             return settlement.settle_all_pending(self.memory_log, self.reflector, self.config, wait=wait)
 
+    def apply_evidence_gate(self, final_state: dict) -> str:
+        """Rewrite a decision no price series backs to REVIEW; return the rating.
+
+        A run that could not read prices is not a tradeable call. The gate runs
+        when the decision is recorded, so the Python API and the CLI both publish
+        REVIEW, and the memory log, the report and the returned signal agree.
+        """
+        signal, gate_note = gate_signal(final_state, run_rating(final_state), self.config)
+        if gate_note:
+            final_state["final_rating"] = signal
+            final_state["final_trade_decision"] = (
+                (final_state.get("final_trade_decision") or "") + gate_note
+            )
+        return signal
+
     def record_decision(self, company_name, trade_date, final_state):
         """Record a finished run: its state log, and its decision in the memory log
-        for reflection on the next same-ticker run. propagate() and the CLI both end here."""
+        for reflection on the next same-ticker run. propagate() and the CLI both end here.
+
+        A run with no price series is recorded as REVIEW by the evidence gate, so
+        neither path can persist a call the data does not support.
+        """
+        self.apply_evidence_gate(final_state)
         self._log_state(trade_date, final_state)
         decision = final_state.get("final_trade_decision")
         if not decision:
@@ -400,16 +420,8 @@ class TradingAgentsGraph:
         else:
             final_state = self.graph.invoke(graph_input, **args)
 
-        # A run that could not obtain a price series is not a tradeable call: the
-        # gate rewrites the rating to REVIEW before the decision is recorded, so
-        # the memory log, the report and the returned signal all agree.
-        signal, gate_note = gate_signal(final_state, run_rating(final_state), self.config)
-        if gate_note:
-            final_state["final_rating"] = signal
-            final_state["final_trade_decision"] = (
-                (final_state.get("final_trade_decision") or "") + gate_note
-            )
-
+        # record_decision applies the evidence gate, so a run without a price
+        # series is stored and returned as REVIEW (see apply_evidence_gate).
         self.record_decision(company_name, trade_date, final_state)
 
         # Clear checkpoint on successful completion to avoid stale state.

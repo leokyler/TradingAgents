@@ -122,3 +122,49 @@ def test_run_graph_publishes_review_when_the_gate_fires(monkeypatch):
     assert state["final_rating"] == RATING_REVIEW
     assert "Data coverage" in state["final_trade_decision"]
     assert stored["rating"] == RATING_REVIEW
+
+
+@pytest.mark.unit
+def test_record_decision_gates_a_cli_style_run(monkeypatch):
+    """The CLI ends at record_decision too: its run must publish REVIEW."""
+    logged, stored = {}, {}
+    g = object.__new__(TradingAgentsGraph)
+    g.config = {"evidence_gate": True}
+    g._log_state = lambda date, state: logged.update(state)
+    g.memory_log = SimpleNamespace(store_decision=lambda **kwargs: stored.update(kwargs))
+    state = {
+        "company_of_interest": "510300.SS",
+        "trade_date": "2026-11-12",
+        "final_rating": "Buy",
+        "final_trade_decision": "**Rating**: Buy\n\nBuy it.",
+    }
+
+    monkeypatch.setattr(evidence, "price_data_available", lambda *a: False)
+    g.record_decision("510300.SS", "2026-11-12", state)
+
+    assert state["final_rating"] == RATING_REVIEW
+    assert "Data coverage" in state["final_trade_decision"]
+    assert logged["final_rating"] == RATING_REVIEW
+    assert stored["rating"] == RATING_REVIEW
+
+
+@pytest.mark.unit
+def test_record_decision_keeps_a_backed_rating(monkeypatch):
+    logged, stored = {}, {}
+    g = object.__new__(TradingAgentsGraph)
+    g.config = {"evidence_gate": True}
+    g._log_state = lambda date, state: logged.update(state)
+    g.memory_log = SimpleNamespace(store_decision=lambda **kwargs: stored.update(kwargs))
+    state = {
+        "company_of_interest": "510300.SS",
+        "trade_date": "2026-11-12",
+        "final_rating": "Sell",
+        "final_trade_decision": "**Rating**: Sell\n\nSell it.",
+    }
+
+    monkeypatch.setattr(evidence, "price_data_available", lambda *a: True)
+    g.record_decision("510300.SS", "2026-11-12", state)
+
+    assert state["final_rating"] == "Sell"
+    assert stored["rating"] == "Sell"
+    assert "Data coverage" not in state["final_trade_decision"]
