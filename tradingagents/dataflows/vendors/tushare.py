@@ -29,6 +29,7 @@ lists it degrades to the keyless sources instead of failing the run.
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 
@@ -52,9 +53,17 @@ from tradingagents.dataflows.indicators import (
 from tradingagents.dataflows.symbols import normalize_symbol
 from tradingagents.dataflows.vendors import transport
 
+logger = logging.getLogger(__name__)
+
 _API_URL = "https://api.tushare.pro"
 _TOKEN_ENV = "TUSHARE_TOKEN"
 _TIMEOUT = 15.0
+
+# Endpoints this token was already told it cannot use (HTTP 40203). Tushare's
+# permission depends on the account's points tier, and a chain that keeps asking
+# an endpoint the account cannot read turns a clear "no permission" into the
+# misleading "a fallback is still available" (#P2-9).
+_NO_PERMISSION: set[str] = set()
 
 # A frame whose newest bar is older than this many calendar days is treated as
 # stale, matching the other price vendors; long holiday weekends fit.
@@ -77,7 +86,18 @@ def _token() -> str:
 
 
 def _post(payload: dict) -> dict:
-    """One API call; transport and API-level failures become typed vendor errors."""
+    """One API call; transport and API-level failures become typed vendor errors.
+
+    A permission answer (40203, or a message saying so) is not a transient
+    outage: it is remembered per endpoint for the process, raised as
+    ``VendorNotConfiguredError`` so the router moves on instead of counting
+    Tushare as a usable fallback, and logged with the endpoint's name.
+    """
+    api_name = str(payload.get("api_name") or "")
+    if api_name in _NO_PERMISSION:
+        raise VendorNotConfiguredError(
+            f"Tushare has no permission for {api_name} (recorded earlier in this process)"
+        )
     try:
         response = _http().post(_API_URL, json=payload, timeout=_TIMEOUT)
         response.raise_for_status()
@@ -86,7 +106,18 @@ def _post(payload: dict) -> dict:
         raise VendorUnavailableError(f"Tushare request failed: {exc}") from exc
     code = body.get("code")
     if code != 0:
-        raise VendorUnavailableError(f"Tushare API error {code}: {body.get('msg')}")
+        message = str(body.get("msg") or "")
+        if code == 40203 or "权限" in message or "permission" in message.lower():
+            _NO_PERMISSION.add(api_name)
+            logger.warning(
+                "Tushare has no permission for %s (code %s): %s; this endpoint is "
+                "not an available fallback for this token.",
+                api_name, code, message,
+            )
+            raise VendorNotConfiguredError(
+                f"Tushare has no permission for {api_name} (code {code}): {message}"
+            )
+        raise VendorUnavailableError(f"Tushare API error {code}: {message}")
     return body
 
 

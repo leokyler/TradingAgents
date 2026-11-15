@@ -161,7 +161,11 @@ uv tool install "git+https://github.com/<owner>/<repo>@<branch-or-tag>" --python
 
 Extras work the same way (`uv tool install ".[bedrock]" --python 3.13`), `uvx
 --from . tradingagents` runs it once without installing, and `uv tool uninstall
-tradingagents` removes it.
+tradingagents` removes it. A-share news needs the optional `cn` extra:
+`pip install ".[cn]"` (or `uv tool install ".[cn]"`) installs `akshare`, which
+`cn_news` imports lazily. Without it the vendor reports itself as not configured
+and the news chain falls through to Yahoo; A-share prices and fund data need no
+extra.
 
 The `.env` file is read from the directory the command is started in, so run it
 from the checkout, or export the `TRADINGAGENTS_*` variables and API keys.

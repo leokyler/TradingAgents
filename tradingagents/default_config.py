@@ -203,7 +203,10 @@ def build_default_config() -> dict:
             # Statements come from SEC EDGAR as filed (US filers), then Yahoo; the
         # overview and insider tools, which SEC EDGAR does not serve, from Yahoo.
         "fundamental_data": "sec_edgar,yfinance",  # Options: sec_edgar, alpha_vantage, yfinance
-            "news_data": "yfinance",             # Options: alpha_vantage, yfinance
+            # The upstream chain for every market. An A-share ETF CLI run adds
+            # cn_news in front of it (see cli/run.py), because that vendor is
+            # gated to .SS/.SZ/.BJ and the async API must not change here.
+            "news_data": "yfinance",             # Options: cn_news, alpha_vantage, yfinance
             "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)
             "prediction_markets": "polymarket",  # Options: polymarket (keyless)
             # Fund-level data for A-share ETFs. Eastmoney (keyless) serves the

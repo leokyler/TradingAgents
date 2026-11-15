@@ -21,6 +21,10 @@ from tradingagents.dataflows.vendors.cn_market import (
     get_indicators as get_cn_market_indicators,
     get_stock_data as get_cn_market_stock,
 )
+from tradingagents.dataflows.vendors.cn_news import (
+    get_global_news as get_cn_news_global_news,
+    get_news as get_cn_news,
+)
 from tradingagents.dataflows.vendors.eastmoney import (
     get_etf_holdings as get_eastmoney_etf_holdings,
     get_etf_index_fundamentals as get_eastmoney_etf_index_fundamentals,
@@ -155,10 +159,14 @@ VENDOR_METHODS = {
     "get_news": {
         "alpha_vantage": get_alpha_vantage_news,
         "yfinance": get_news_yfinance,
+        # A-share listings only; a non-A-share symbol raises NotConfigured
+        # before akshare is imported, so the next vendor serves it unchanged.
+        "cn_news": get_cn_news,
     },
     "get_global_news": {
         "yfinance": get_global_news_yfinance,
         "alpha_vantage": get_alpha_vantage_global_news,
+        "cn_news": get_cn_news_global_news,
     },
     "get_insider_transactions": {
         "alpha_vantage": get_alpha_vantage_insider_transactions,
@@ -238,10 +246,25 @@ def route_to_vendor(method: str, *args, **kwargs):
     """Route method calls to appropriate vendor implementation with fallback support."""
     category = get_category_for_method(method)
     vendor_config = get_vendor(category, method)
-    primary_vendors = [v.strip() for v in vendor_config.split(',')]
 
     if method not in VENDOR_METHODS:
         raise ValueError(f"Method '{method}' not supported")
+
+    # An empty news chain is a configuration choice, not a missing one: the user
+    # turned news off. Returning at once says so, instead of walking the default
+    # chain (14 seconds of Yahoo retries) before reporting a failure that was
+    # never a fetch failure (#P1-5). Other categories keep their previous
+    # empty-chain behaviour; the requirement names news_data only.
+    if category == "news_data" and isinstance(vendor_config, str) and not vendor_config.strip():
+        label = category[:-5] if category.endswith("_data") else category
+        return (
+            f"NO_DATA_AVAILABLE: no {label} vendor configured for {method}; the "
+            f"'{category}' chain is empty by configuration, so no request was "
+            f"made. Set data_vendors[{category!r}] to a vendor name, or leave it "
+            f"unset to use the default chain."
+        )
+
+    primary_vendors = [v.strip() for v in vendor_config.split(',')]
 
     all_available_vendors = list(VENDOR_METHODS[method].keys())
 

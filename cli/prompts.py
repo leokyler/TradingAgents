@@ -114,9 +114,14 @@ def parse_analysts(value: str, asset_type: AssetType) -> list[AnalystType]:
     if unknown:
         choices = ", ".join("sentiment" if a.value == "social" else a.value for a in available)
         raise ValueError(f"unknown analyst {', '.join(unknown)}; choose from {choices}")
-    unavailable = [n for n in names if known[n] not in available]
+    unavailable = list(dict.fromkeys(n for n in names if known[n] not in available))
     if unavailable:
-        raise ValueError(f"{', '.join(unavailable)} is not available for {asset_type.value}")
+        # Name the choices too, as the unknown branch does, so the message says
+        # what this asset type does take instead of only what it rejects.
+        choices = ", ".join(sorted("sentiment" if a.value == "social" else a.value for a in available))
+        raise ValueError(
+            f"{', '.join(unavailable)} is not available for {asset_type.value}; choose from {choices}"
+        )
     return [a for a in available if a.value in names]
 
 

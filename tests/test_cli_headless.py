@@ -141,7 +141,7 @@ def test_the_command_passes_its_flags_to_the_run(monkeypatch):
                                                "--analysts", "market,news", "--save", "--no-show"])
 
     assert result.exit_code == 0, result.output
-    assert seen["flags"] == {**FLAGS, "html": None}
+    assert seen["flags"] == {**FLAGS, "html": None, "strict": False}
 
 
 @pytest.mark.unit
@@ -362,3 +362,17 @@ def test_a_page_the_browser_cannot_open_is_pointed_to(monkeypatch, tmp_path, cap
     run._offer_reports(STATE, _report_graph(tmp_path), "NVDA")
 
     assert "complete_report.html" in capsys.readouterr().out.split("the page is at:")[-1]
+
+
+@pytest.mark.unit
+def test_an_a_share_etf_run_prepends_cn_news_without_changing_other_markets():
+    base = {
+        "research_depth": 1,
+        "quick_think_llm": "q", "deep_think_llm": "d", "backend_url": None,
+        "llm_provider": "openai", "output_language": "English",
+    }
+    etf = run._build_run_config({**base, "asset_type": "etf"}, None)
+    stock = run._build_run_config({**base, "asset_type": "stock"}, None)
+
+    assert etf["data_vendors"]["news_data"] == "cn_news,yfinance"
+    assert stock["data_vendors"]["news_data"] == "yfinance"

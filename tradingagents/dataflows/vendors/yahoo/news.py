@@ -138,6 +138,7 @@ def get_global_news_yfinance(
     as_of_date: str,
     look_back_days: int | None = None,
     limit: int | None = None,
+    symbol: str | None = None,
 ) -> str:
     """
     Retrieve global/macro economic news using yfinance Search.
@@ -148,6 +149,8 @@ def get_global_news_yfinance(
             ``global_news_lookback_days`` from the active config.
         limit: Maximum number of articles to return. ``None`` falls back to
             ``global_news_article_limit`` from the active config.
+        symbol: The run's instrument, used by symbol-gated vendors (cn_news) to
+            refuse a non-A-share run; Yahoo serves every market and ignores it.
 
     Returns:
         Formatted string containing global news articles

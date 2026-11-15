@@ -24,6 +24,7 @@ from cli.display import (
 )
 from cli.selections import depth_from_env, get_user_selections, unattended_gaps
 from cli.stats_handler import StatsCallbackHandler
+from tradingagents.agents import structured as structured_output
 from tradingagents.agents.rating import is_review, run_rating
 from tradingagents.dataflows.symbols import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
@@ -63,6 +64,13 @@ def _build_run_config(selections: dict, checkpoint: bool | None) -> dict:
     value on DEFAULT_CONFIG is preserved unless the user overrode it on the CLI.
     """
     config = DEFAULT_CONFIG.copy()
+    # A-share ETFs get the keyless CN news vendor first, without changing the
+    # default chain every other market uses: cn_news refuses any symbol outside
+    # .SS/.SZ/.BJ before importing akshare, and an explicit env chain is kept.
+    config["data_vendors"] = dict(config.get("data_vendors") or {})
+    if (selections.get("asset_type") == "etf"
+            and config["data_vendors"].get("news_data") == "yfinance"):
+        config["data_vendors"]["news_data"] = "cn_news,yfinance"
     # Research depth sets both round counts, but an explicit env override
     # (TRADINGAGENTS_MAX_DEBATE_ROUNDS / _MAX_RISK_ROUNDS) wins over the
     # interactive selection — leave the env-applied value in place (#977).
@@ -98,6 +106,7 @@ def _build_run_config(selections: dict, checkpoint: bool | None) -> dict:
 
 def run_analysis(checkpoint: bool | None = None, portfolio=None, flags=None):
     flags = flags or {}
+    structured_output.reset_fallback_events()
     # With no terminal nothing can answer a prompt: name every question still
     # open before any model is called, rather than stopping at the first one.
     if not (sys.stdin and sys.stdin.isatty()):
@@ -387,6 +396,49 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None, flags=None):
 
     _offer_reports(final_state, graph, selections["ticker"],
                    save=flags.get("save"), show=flags.get("show"), html=flags.get("html"))
+
+    _report_structured_fallbacks(log_file)
+    _enforce_strict(final_state, flags)
+
+
+def _enforce_strict(final_state, flags):
+    """Exit 1 after the reports are written when ``--strict`` found a problem."""
+    if flags.get("strict") and strict_problems(final_state):
+        console.print(
+            "[red]--strict: the run is not clean (free-text fallback or a missing "
+            "decision label); reports were written, exiting 1.[/red]"
+        )
+        raise typer.Exit(code=1)
+
+
+def strict_problems(final_state):
+    """Why ``--strict`` would fail this run: fallbacks, then missing decision labels."""
+    return list(structured_output.fallback_events()) + list(
+        structured_output.missing_decision_labels(final_state)
+    )
+
+
+def _report_structured_fallbacks(log_file):
+    """Say loudly, and keep in the run log, that a structured agent degraded.
+
+    The report already carries the fallback marker at its top; this puts the
+    same fact on the console at WARNING level and writes the parser's own reason
+    (already truncated to 200 characters) beside the other run messages, so a
+    post-mortem does not need the model's raw response.
+    """
+    for agent, reason, missing in structured_output.fallback_events():
+        line = (
+            f"WARNING: {agent} structured output failed; free-text fallback used. "
+            f"Raw parser error: {reason}"
+        )
+        if missing:
+            line += f" Missing required labels: {', '.join(missing)}"
+        console.print(f"[yellow]{line}[/yellow]")
+        try:
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [WARNING] {line}\n")
+        except OSError:
+            pass
 
 
 def _yes(question: str) -> bool:

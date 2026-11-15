@@ -5,6 +5,8 @@ throttled. "The symbol may be invalid or delisted" is a claim about the company
 that nobody checked, and an exception out of a tool ends the run.
 """
 
+import logging
+
 import pandas as pd
 import pytest
 import yfinance as yf
@@ -30,6 +32,19 @@ DAY = "2026-09-18"
 
 def _rate_limited(*args, **kwargs):
     raise YFRateLimitError()
+
+
+def _must_not_run():
+    raise AssertionError("yf_retry touched the network while the process was rate limited")
+
+
+@pytest.fixture(autouse=True)
+def _fresh_rate_limit_state():
+    """The rate-limit flag is process-wide: a 429 in one test must not make the next
+    test fail fast."""
+    common.reset_rate_limit_state()
+    yield
+    common.reset_rate_limit_state()
 
 
 @pytest.fixture
@@ -284,3 +299,106 @@ def test_a_missing_time_zone_is_not_taken_for_an_answer(yahoo):
 
     with pytest.raises(VendorUnavailableError):
         market.get_YFin_data_online("AAPL", "2026-09-21", "2026-09-25")
+
+
+@pytest.mark.unit
+def test_a_retried_rate_limit_clears_the_flag(yahoo):
+    """Yahoo answering after the retry means it is not throttled any more."""
+    calls = []
+
+    def answer():
+        calls.append(1)
+        if len(calls) == 1:
+            raise YFRateLimitError()
+        return 7.0
+
+    assert common.yf_retry(answer) == 7.0
+    assert len(calls) == 2      # one retry
+
+    # the flag is clear: the next request is attempted, not failed fast
+    assert common.yf_retry(lambda: 9.0) == 9.0
+
+
+@pytest.mark.unit
+def test_a_rate_limit_is_retried_once_then_reported(yahoo, monkeypatch, caplog):
+    """A 429 gets one short retry, not the old 2+4+8 second backoff."""
+    sleeps = []
+    monkeypatch.setattr(common.time, "sleep", sleeps.append)
+    calls = []
+
+    def always_limited():
+        calls.append(1)
+        raise YFRateLimitError()
+
+    with (
+        caplog.at_level(logging.WARNING, logger=common.__name__),
+        pytest.raises(VendorUnavailableError, match="rate limited"),
+    ):
+        common.yf_retry(always_limited)
+
+    assert len(calls) == 2
+    assert sum(sleeps) <= 3.0
+    retry_logs = [r for r in caplog.records if "retrying in" in r.getMessage()]
+    assert len(retry_logs) <= 1
+
+
+@pytest.mark.unit
+def test_a_rate_limited_process_skips_later_requests(yahoo, monkeypatch, caplog):
+    """Once a 429 is seen, every later call fails fast: no request, no sleep, no retry log."""
+    with pytest.raises(VendorUnavailableError, match="rate limited"):
+        common.yf_retry(_rate_limited)
+
+    sleeps = []
+    monkeypatch.setattr(common.time, "sleep", sleeps.append)
+    caplog.clear()
+
+    with (
+        caplog.at_level(logging.WARNING, logger=common.__name__),
+        pytest.raises(VendorUnavailableError, match="rate limited"),
+    ):
+        common.yf_retry(_must_not_run)
+
+    assert sleeps == []
+    assert [r for r in caplog.records if "retrying in" in r.getMessage()] == []
+
+
+@pytest.mark.unit
+def test_the_retry_warning_is_logged_at_most_once_per_process(yahoo, caplog):
+    """A later episode after a success is remembered but no longer warned about."""
+    answers = [YFRateLimitError(), 1.0, YFRateLimitError(), YFRateLimitError()]
+
+    def answer():
+        item = answers.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    with caplog.at_level(logging.WARNING, logger=common.__name__):
+        assert common.yf_retry(answer) == 1.0
+        with pytest.raises(VendorUnavailableError, match="rate limited"):
+            common.yf_retry(answer)
+
+    retry_logs = [r for r in caplog.records if "retrying in" in r.getMessage()]
+    assert len(retry_logs) == 1
+
+
+@pytest.mark.unit
+def test_reset_rate_limit_state_re_arms_the_request(yahoo):
+    with pytest.raises(VendorUnavailableError, match="rate limited"):
+        common.yf_retry(_rate_limited)
+
+    common.reset_rate_limit_state()
+
+    assert common.yf_retry(lambda: 11.0) == 11.0
+
+
+@pytest.mark.unit
+def test_an_empty_answer_still_returns_none(yahoo):
+    """Yahoo answering that a window has no prices is not an outage."""
+    from yfinance.exceptions import YFPricesMissingError
+
+    def no_prices():
+        raise YFPricesMissingError("AAPL", " (1d 2026-09-26 -> 2026-09-27)")
+
+    assert common.yf_retry(no_prices) is None
+

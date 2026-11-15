@@ -13,7 +13,10 @@ canonical pattern:
    back to a plain ``llm.invoke`` so the pipeline never blocks.
 
 Centralising the pattern here keeps the agent factories small and ensures
-all three agents log the same warnings when fallback fires.
+all three agents log the same warnings when fallback fires. What a fallback
+means for the report, the run log and ``--strict`` lives in
+``tradingagents.agents.fallback`` (a fork module), so this upstream file only
+calls into it.
 """
 
 from __future__ import annotations
@@ -24,7 +27,30 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
+from tradingagents.agents.fallback import (
+    FREETEXT_FALLBACK_MARKER,
+    fallback_events,
+    free_text_with_warning,
+    last_reason,
+    missing_decision_labels,
+    record_structured_failure,
+    reset_fallback_events,
+)
+
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "FREETEXT_FALLBACK_MARKER",
+    "NO_EXTERNAL_TOOLS",
+    "bind_structured",
+    "fallback_events",
+    "free_text_with_warning",
+    "invoke_structured",
+    "invoke_structured_or_freetext",
+    "last_reason",
+    "missing_decision_labels",
+    "reset_fallback_events",
+]
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -62,6 +88,11 @@ def invoke_structured(structured_llm: Any | None, prompt: Any, agent_name: str) 
     ``prompt`` is whatever the underlying LLM accepts (a string for chat
     invocations, a list of message dicts for chat models that take that
     shape), so a caller can forward the same value to its free-text fallback.
+
+    A failure is logged at WARNING with the parser's own reason (the first 200
+    characters, so a giant provider payload does not flood the log), and the
+    failure is recorded for the run log and strict mode. The caller must then
+    use :func:`free_text_with_warning`, not the bare free-text answer.
     """
     if structured_llm is None:
         return None
@@ -74,10 +105,7 @@ def invoke_structured(structured_llm: Any | None, prompt: Any, agent_name: str) 
             raise ValueError("structured output returned no parsed result")
         return result
     except Exception as exc:
-        logger.warning(
-            "%s: structured-output invocation failed (%s); retrying once as free text",
-            agent_name, exc,
-        )
+        record_structured_failure(agent_name, exc)
         return None
 
 
@@ -88,8 +116,18 @@ def invoke_structured_or_freetext(
     render: Callable[[T], str],
     agent_name: str,
 ) -> str:
-    """Run the structured call and render to markdown; fall back to free-text on any failure."""
+    """Run the structured call and render to markdown; fall back to free-text on any failure.
+
+    The fallback is headed by :data:`FREETEXT_FALLBACK_MARKER` so the degraded
+    artifact is identifiable in the report, the memory log and strict mode.
+    """
+    # No structured binding means the provider cannot return the schema at all;
+    # free text is then the intended path, not a degraded one, so no fallback is
+    # recorded and strict mode does not fail an otherwise normal run.
+    if structured_llm is None:
+        return plain_llm.invoke(prompt).content
     result = invoke_structured(structured_llm, prompt, agent_name)
     if result is not None:
         return render(result)
-    return plain_llm.invoke(prompt).content
+    text = plain_llm.invoke(prompt).content
+    return free_text_with_warning(agent_name, text, last_reason(agent_name))

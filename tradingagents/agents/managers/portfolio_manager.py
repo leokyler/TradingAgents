@@ -17,7 +17,13 @@ from tradingagents.agents.context import (
 )
 from tradingagents.agents.rating import parse_rating
 from tradingagents.agents.schemas import PortfolioDecision, render_pm_decision
-from tradingagents.agents.structured import NO_EXTERNAL_TOOLS, bind_structured, invoke_structured
+from tradingagents.agents.structured import (
+    NO_EXTERNAL_TOOLS,
+    bind_structured,
+    free_text_with_warning,
+    invoke_structured,
+    last_reason,
+)
 
 
 def create_portfolio_manager(llm):
@@ -81,8 +87,15 @@ Write these sections, in this order, starting with the rating on its own line:
         if decision is not None:
             final_trade_decision = render_pm_decision(decision)
             final_rating = decision.rating.value
-        else:
+        elif structured_llm is None:
+            # The provider cannot return the schema: free text is the intended
+            # path, not a fallback, so it is neither marked nor strict-failed.
             final_trade_decision = llm.invoke(prompt).content
+            final_rating = parse_rating(final_trade_decision)
+        else:
+            final_trade_decision = free_text_with_warning(
+                "Portfolio Manager", llm.invoke(prompt).content, last_reason("Portfolio Manager")
+            )
             final_rating = parse_rating(final_trade_decision)
 
         new_risk_debate_state = {

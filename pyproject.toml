@@ -46,6 +46,15 @@ dev = [
 bedrock = [
     "langchain-aws>=1.7.9",
 ]
+# Keyless A-share news (Eastmoney per-symbol news and global flashes, via
+# `tradingagents/dataflows/vendors/cn_news.py`). Optional so the core install
+# stays lean and free of akshare's mini-racer download: the vendor imports it
+# lazily and reports itself as not configured when it is absent.
+# pip install "tradingagents[cn]"; 1.20.42 is the version the vendor's column
+# names and both interface names were verified against.
+cn = [
+    "akshare>=1.20.42",
+]
 
 [project.scripts]
 tradingagents = "cli.main:app"

@@ -15,6 +15,7 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
+from cli.plain_report import print_plain_report, stdout_is_a_terminal
 from tradingagents.graph.analyst_execution import (
     ANALYST_NODE_SPECS,
     AnalystExecutionPlan,
@@ -381,6 +382,11 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
 
 def display_complete_report(final_state):
     """Display the complete analysis report sequentially (avoids truncation)."""
+    if not stdout_is_a_terminal(console):
+        # A pipe is not something rich can draw into; keep --show | tee complete.
+        print_plain_report(final_state)
+        return
+
     console.print()
     console.print(Rule("Complete Analysis Report", style="bold green"))
 

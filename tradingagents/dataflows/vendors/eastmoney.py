@@ -36,8 +36,10 @@ import re
 from datetime import datetime
 
 from tradingagents.dataflows.date_window import is_historical
+from tradingagents.dataflows.dates import parse_day
 from tradingagents.dataflows.errors import NoMarketDataError, VendorUnavailableError
 from tradingagents.dataflows.etf import etf_code
+from tradingagents.dataflows.snapshot_equivalence import session_clock
 from tradingagents.dataflows.symbols import normalize_symbol
 from tradingagents.dataflows.vendors import transport
 
@@ -129,17 +131,123 @@ def _fmt(value: float | None, unit: str = "", digits: int = 2) -> str:
     return f"{text}{unit}"
 
 
-def _withhold_if_historical(canonical: str, as_of_date: str | None, what: str) -> str | None:
-    """The notice a historical run gets instead of a present-day snapshot."""
+def _point_in_time(canonical: str, as_of_date: str | None) -> tuple[bool, str]:
+    """Whether the present-day snapshot may be served, and the note to head it with.
+
+    A run dated today is served as before. A run dated in the past is served
+    only when the market clock proves no session closed after its date — the
+    snapshot is then equivalent to what was public then, and the note says so.
+    Otherwise the caller withholds and explains the two possible reasons.
+    """
     if not as_of_date or not is_historical(as_of_date):
-        return None
+        return True, ""
+    clock = session_clock(canonical, as_of_date)
+    as_of = parse_day(as_of_date)
+    if as_of is None:
+        return False, ""
+    if clock.equivalent_for(as_of):
+        return True, f"> {clock.release_note(as_of)}"
+    return False, ""
+
+
+def _structural_notice(
+    what: str, canonical: str, as_of_date: str, clock, detail: str
+) -> str:
+    """A withheld present-day snapshot whose values *are* shown, clearly dated.
+
+    ``STRUCTURALLY_UNAVAILABLE`` says the vendor has no historical vintage, not
+    that the request failed. The nearest snapshot and the gap let the analyst
+    judge whether reading present-day figures is defensible; the header and the
+    trailing warning say they are not values the run could have seen.
+    """
+    as_of = parse_day(as_of_date)
+    gap = clock.gap_text(as_of) if as_of is not None else "an unknown distance after it"
     return (
-        f"# {what} for {canonical}\n\n"
-        f"{what} are withheld for this date: the vendor serves only the current "
-        f"snapshot, with no filing date, so it cannot show what was public on "
-        f"{as_of_date}. The price history for this run still comes from the "
+        f"# {what} for {canonical}\n"
+        f"# Point-in-time as of: {as_of_date}\n\n"
+        f"STRUCTURALLY_UNAVAILABLE: {what} are withheld for {as_of_date}. The "
+        f"vendor serves only the current snapshot, with no filing date, so it "
+        f"cannot show what was public on {as_of_date}. This is a vendor limit, "
+        f"not a network failure.\n\n"
+        f"Nearest available snapshot: the current live vendor snapshot; its newest "
+        f"closed session is {clock.last_closed.isoformat() if clock.last_closed else 'unknown'} "
+        f"({gap}).\n\n"
+        f"{detail}\n"
+        f"Do not present any snapshot figure above as information available on "
+        f"{as_of_date}; the price history for this run still comes from the "
         f"market data vendor."
     )
+
+
+def _data_unavailable(what: str, canonical: str, as_of_date: str, exc: Exception) -> str:
+    """A withheld snapshot whose nearest-snapshot read failed: not an absence claim."""
+    return (
+        f"# {what} for {canonical}\n"
+        f"# Point-in-time as of: {as_of_date}\n\n"
+        f"DATA_UNAVAILABLE: {what} are withheld for {as_of_date}, but the nearest "
+        f"snapshot could not be read ({type(exc).__name__}: {str(exc)[:200]}). This "
+        f"is a failed request, not an absence of the data and not a point-in-time "
+        f"judgement; do not estimate or fabricate values."
+    )
+
+
+def _premium(price: float | None, nav: float | None) -> tuple[float, str] | None:
+    """The premium/discount a price implies against a published NAV."""
+    if price is None or not nav:
+        return None
+    premium = (price - nav) / nav * 100
+    return premium, ("premium" if premium > 0 else "discount")
+
+
+def _profile_metrics(code: str, secid: str) -> dict:
+    """The profile's numbers, read once so the served and withheld blocks agree."""
+    quote = _quote(secid)
+    nav_pair = _latest_nav(code)
+    nav, nav_date = nav_pair if nav_pair else (None, "")
+    return {
+        "name": quote.get("f58") or code,
+        "price": _as_float(quote.get("f43")),
+        "prev": _as_float(quote.get("f60")),
+        "change": _as_float(quote.get("f169")),
+        "pct": _as_float(quote.get("f170")),
+        "volume": _as_float(quote.get("f47")),      # lots (100 shares)
+        "amount": _as_float(quote.get("f48")),      # CNY
+        "shares": _as_float(quote.get("f84")),
+        "market_value": _as_float(quote.get("f116")),
+        "turnover": _as_float(quote.get("f168")),   # percent
+        "nav": nav,
+        "nav_date": nav_date,
+    }
+
+
+def _profile_snapshot_lines(code: str, secid: str) -> list[str]:
+    """Current profile figures for a withheld run's nearest-snapshot block.
+
+    The units are the vendor-neutral English ones (CNY, shares, lots) so a data
+    block does not hardcode the run's output language; the model renders the
+    report in the configured language.
+    """
+    metrics = _profile_metrics(code, secid)
+    price, nav = metrics["price"], metrics["nav"]
+    lines = [f"Snapshot values for {code} ({metrics['name']}):"]
+    if price is not None:
+        lines.append(f"- **Price**: {price:.3f} CNY")
+    if metrics["volume"] is not None and metrics["amount"] is not None:
+        lines.append(f"- **Session volume**: {metrics['volume'] / 1e4:,.2f} 10k lots "
+                     f"(CNY {metrics['amount'] / 1e8:,.2f} 100m traded)")
+    if metrics["shares"] is not None:
+        lines.append(f"- **Shares outstanding**: {metrics['shares'] / 1e8:,.2f} 100m shares")
+    if metrics["market_value"] is not None:
+        lines.append(f"- **Fund size (shares x price)**: "
+                     f"CNY {metrics['market_value'] / 1e8:,.2f} 100m")
+    if nav is not None:
+        lines.append(f"- **Latest published NAV**: {nav:.4f} ({metrics['nav_date']})")
+        premium = _premium(price, nav)
+        if premium is not None:
+            value, state = premium
+            lines.append(f"- **Premium/discount vs that NAV**: {value:+.2f}% ({state})")
+    return lines
+
 
 
 def _quote(secid: str, fields: str = _QUOTE_FIELDS) -> dict:
@@ -185,27 +293,30 @@ def get_etf_profile(ticker: str, as_of_date: str | None = None) -> str:
     """A markdown profile of the fund: price, size, shares, NAV and premium."""
     canonical = normalize_symbol(ticker)
     code = _guard(ticker)
-    withheld = _withhold_if_historical(canonical, as_of_date, "ETF profile")
-    if withheld:
-        return withheld
-
     secid = eastmoney_secid(canonical) or f"1.{code}"
-    quote = _quote(secid)
-    name = quote.get("f58") or code
-    price = _as_float(quote.get("f43"))
-    prev = _as_float(quote.get("f60"))
-    change = _as_float(quote.get("f169"))
-    pct = _as_float(quote.get("f170"))
-    volume = _as_float(quote.get("f47"))          # lots (100 shares)
-    amount = _as_float(quote.get("f48"))          # CNY
-    shares = _as_float(quote.get("f84"))
-    market_value = _as_float(quote.get("f116"))
-    turnover = _as_float(quote.get("f168"))       # percent
 
-    nav_pair = _latest_nav(code)
-    nav, nav_date = nav_pair if nav_pair else (None, "")
+    serve, note = _point_in_time(canonical, as_of_date)
+    if not serve:
+        clock = session_clock(canonical, as_of_date or "")
+        try:
+            detail = "\n".join(_profile_snapshot_lines(code, secid))
+        except Exception as exc:  # noqa: BLE001 - report the failed read, don't end the run
+            return _data_unavailable("ETF profile", canonical, as_of_date or "", exc)
+        return _structural_notice("ETF profile", canonical, as_of_date or "", clock, detail)
 
-    lines = [f"# ETF profile for {canonical} ({name})", ""]
+    metrics = _profile_metrics(code, secid)
+    name = metrics["name"]
+    price, prev = metrics["price"], metrics["prev"]
+    change, pct = metrics["change"], metrics["pct"]
+    volume, amount = metrics["volume"], metrics["amount"]
+    shares, market_value = metrics["shares"], metrics["market_value"]
+    turnover = metrics["turnover"]
+    nav, nav_date = metrics["nav"], metrics["nav_date"]
+
+    lines = [f"# ETF profile for {canonical} ({name})"]
+    if note:
+        lines.append(note)
+    lines.append("")
     if price is not None:
         move = ""
         if change is not None and pct is not None:
@@ -222,10 +333,10 @@ def get_etf_profile(ticker: str, as_of_date: str | None = None) -> str:
         lines.append(f"- **Fund size (shares x price)**: {_fmt(market_value / 1e8, ' 亿元')}")
     if nav is not None:
         lines.append(f"- **Latest published NAV**: {nav:.4f} ({nav_date})")
-        if price is not None and nav:
-            premium = (price - nav) / nav * 100
-            state = "premium" if premium > 0 else "discount"
-            lines.append(f"- **Premium/discount vs latest NAV**: {premium:+.2f}% ({state})")
+        premium = _premium(price, nav)
+        if premium is not None:
+            value, state = premium
+            lines.append(f"- **Premium/discount vs latest NAV**: {value:+.2f}% ({state})")
     if turnover is not None:
         lines.append(f"- **Turnover**: {turnover:.2f}%")
 
@@ -312,11 +423,7 @@ def _holdings_rows(code: str, as_of_date: str | None = None, limit: int = 10,
 
 def _last_quarter_end(as_of_date: str) -> tuple[int, int]:
     """The (year, month) of the last quarter end on or before ``as_of_date``."""
-    try:
-        day = datetime.strptime(as_of_date, "%Y-%m-%d")
-    except (TypeError, ValueError):
-        today = datetime.today()
-        day = today
+    day = parse_day(as_of_date) or datetime.today().date()
     for month in reversed(_QUARTER_MONTHS):
         if month <= day.month:
             return day.year, month
@@ -398,6 +505,64 @@ def _constituent_valuation(code: str) -> dict | None:
             "industry": quote.get("f127") or ""}
 
 
+def _covered_valuation(rows: list[dict]) -> dict | None:
+    """The capital-weighted aggregate over the disclosed rows, or None if none valued.
+
+    Only constituents with a usable PE and PB enter the sums:
+    ``PE = sum(cap) / sum(cap / PE)``, ``PB = sum(cap) / sum(cap / PB)`` and
+    ``ROE = PB / PE``. The result also carries the disclosed and covered weights,
+    so the caller can state how much of the fund the figure describes.
+    """
+    covered = []
+    for row in rows:
+        valuation = _constituent_valuation(row["code"])
+        if valuation:
+            covered.append({**valuation, "weight": row["weight"]})
+    if not covered:
+        return None
+
+    cap_sum = sum(item["cap"] for item in covered)
+    pe_caps = [(item["cap"], item["pe"]) for item in covered if item["pe"] and item["pe"] > 0]
+    pb_caps = [(item["cap"], item["pb"]) for item in covered if item["pb"] and item["pb"] > 0]
+
+    index_pe = cap_sum / sum(cap / pe for cap, pe in pe_caps) if pe_caps else None
+    index_pb = cap_sum / sum(cap / pb for cap, pb in pb_caps) if pb_caps else None
+    index_roe = index_pb / index_pe if index_pe and index_pb else None
+    return {
+        "covered": covered,
+        "pe": index_pe,
+        "pb": index_pb,
+        "roe": index_roe,
+        "disclosed_weight": sum(row["weight"] for row in rows),
+        "covered_weight": sum(item["weight"] for item in covered),
+    }
+
+
+def _valuation_snapshot_lines(code: str, limit: int) -> list[str]:
+    """Present-day basket valuation, for the nearest-snapshot block of a withheld run."""
+    current = _holdings_rows(code, None, limit)
+    if not current["rows"]:
+        return ["Snapshot values: the vendor discloses no equity holdings for this fund."]
+    aggregate = _covered_valuation(current["rows"])
+    if aggregate is None:
+        return ["Snapshot values: no constituent valuation could be read."]
+    lines = [
+        f"Snapshot values over the newest disclosed holdings "
+        f"({current.get('quarter') or 'current quarter'}, as of {current['report_date']}):"
+    ]
+    if aggregate["pe"]:
+        lines.append(f"- **Aggregate PE (TTM)**: {aggregate['pe']:.2f}")
+    if aggregate["pb"]:
+        lines.append(f"- **Aggregate PB**: {aggregate['pb']:.2f}")
+    if aggregate["roe"]:
+        lines.append(f"- **Implied ROE (PB/PE)**: {aggregate['roe'] * 100:.2f}%")
+    lines.append(
+        f"- **Coverage**: disclosed rows are {aggregate['disclosed_weight']:.2f}% of NAV; "
+        f"valued rows are {aggregate['covered_weight']:.2f}% of NAV"
+    )
+    return lines
+
+
 def get_etf_index_fundamentals(ticker: str, as_of_date: str | None = None, limit: int = 10) -> str:
     """Valuation of the basket: aggregate PE/PB/ROE over the disclosed holdings.
 
@@ -417,9 +582,17 @@ def get_etf_index_fundamentals(ticker: str, as_of_date: str | None = None, limit
     # The valuation multiples are a present-day snapshot, so a historical run
     # gets no aggregate: the holdings may be point-in-time, but the PE/PB are
     # not, and mixing them would leak today's valuation into a past decision.
-    withheld = _withhold_if_historical(canonical, as_of_date, "ETF index fundamentals")
-    if withheld:
-        return withheld
+    serve, note = _point_in_time(canonical, as_of_date)
+    if not serve:
+        clock = session_clock(canonical, as_of_date or "")
+        try:
+            detail = "\n".join(_valuation_snapshot_lines(code, limit))
+        except Exception as exc:  # noqa: BLE001 - report the failed read, don't end the run
+            return _data_unavailable("ETF index fundamentals", canonical, as_of_date or "", exc)
+        return _structural_notice(
+            "ETF index fundamentals", canonical, as_of_date or "", clock, detail
+        )
+
     data = _holdings_rows(code, as_of_date, limit)
 
     report_date = data["report_date"]
@@ -440,28 +613,19 @@ def get_etf_index_fundamentals(ticker: str, as_of_date: str | None = None, limit
             "not by a PE multiple."
         )
 
-    covered = []
-    for row in data["rows"]:
-        valuation = _constituent_valuation(row["code"])
-        if valuation:
-            covered.append({**valuation, "weight": row["weight"]})
-    if not covered:
+    aggregate = _covered_valuation(data["rows"])
+    if aggregate is None:
         raise NoMarketDataError(ticker, canonical,
                                 "no constituent valuation available for the disclosed holdings")
+    covered = aggregate["covered"]
+    index_pe, index_pb, index_roe = aggregate["pe"], aggregate["pb"], aggregate["roe"]
+    disclosed_weight = aggregate["disclosed_weight"]
+    covered_weight = aggregate["covered_weight"]
 
-    cap_sum = sum(item["cap"] for item in covered)
-    pe_caps = [(item["cap"], item["pe"]) for item in covered if item["pe"] and item["pe"] > 0]
-    pb_caps = [(item["cap"], item["pb"]) for item in covered if item["pb"] and item["pb"] > 0]
-
-    index_pe = cap_sum / sum(cap / pe for cap, pe in pe_caps) if pe_caps else None
-    index_pb = cap_sum / sum(cap / pb for cap, pb in pb_caps) if pb_caps else None
-    index_roe = index_pb / index_pe if index_pe and index_pb else None
-
-    disclosed_weight = sum(row["weight"] for row in data["rows"])
-    covered_weight = sum(item["weight"] for item in covered)
-
-    lines = [
-        f"# ETF index fundamentals for {canonical} (holdings as of {report_date})",
+    lines = [f"# ETF index fundamentals for {canonical} (holdings as of {report_date})"]
+    if note:
+        lines.append(note)
+    lines += [
         "",
         "| Code | Name | Industry | Weight | Market cap (亿) | PE | PB |",
         "|---|---|---|---:|---:|---:|---:|",
