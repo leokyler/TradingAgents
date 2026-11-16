@@ -72,3 +72,34 @@ def test_a_served_valuation_block_gets_no_anchor(monkeypatch):
     set_config({"data_vendors": {"etf_data": "eastmoney,csindex"}})
 
     assert etf_analyst._fetch_valuation("515070.SS", "2026-11-10") == "# Aggregate PE: 30.17"
+
+
+@pytest.mark.unit
+def test_a_tool_level_override_to_eastmoney_excludes_csindex(monkeypatch):
+    """tool_vendors wins in the router, so it must win in the anchor gate too."""
+    from tradingagents.dataflows.vendors import csindex
+
+    def must_not_run(*args, **kwargs):
+        raise AssertionError("csindex was called despite a tool-level eastmoney override")
+
+    monkeypatch.setattr(etf_analyst, "_fetch", lambda *a, **k: _NOTICE)
+    monkeypatch.setattr(csindex, "point_in_time_summary", must_not_run)
+    set_config({
+        "data_vendors": {"etf_data": "eastmoney,csindex"},
+        "tool_vendors": {"get_etf_index_fundamentals": "eastmoney"},
+    })
+
+    assert etf_analyst._fetch_valuation("515070.SS", "2026-11-10") == _NOTICE
+
+
+@pytest.mark.unit
+def test_default_means_every_vendor_including_csindex(monkeypatch):
+    """`default` is the router's all-vendors sentinel, not a literal vendor name."""
+    from tradingagents.dataflows.vendors import csindex
+
+    monkeypatch.setattr(etf_analyst, "_fetch", lambda *a, **k: _NOTICE)
+    monkeypatch.setattr(csindex, "point_in_time_summary",
+                        lambda ticker, day: _ANCHOR)
+    set_config({"data_vendors": {"etf_data": "default"}})
+
+    assert etf_analyst._fetch_valuation("515070.SS", "2026-11-10").endswith(_ANCHOR)

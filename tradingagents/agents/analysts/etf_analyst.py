@@ -23,8 +23,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from tradingagents.agents.analysts.etf_price import build_price_window
 from tradingagents.agents.context import get_instrument_context_from_state, get_language_instruction
 from tradingagents.agents.structured import NO_EXTERNAL_TOOLS
-from tradingagents.dataflows.config import get_config
-from tradingagents.dataflows.router import route_to_vendor
+from tradingagents.dataflows.router import VENDOR_METHODS, get_vendor, route_to_vendor
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +52,12 @@ def _fetch_valuation(ticker: str, trade_date: str) -> str:
     if "STRUCTURALLY_UNAVAILABLE" not in text:
         return text
     try:
-        chain = str(get_config().get("data_vendors", {}).get("etf_data", ""))
-        if "csindex" not in [vendor.strip() for vendor in chain.split(",")]:
+        # The effective chain, not just the category value: a tool_vendors
+        # override for this method wins in the router, so it must win here too.
+        raw = str(get_vendor("etf_data", "get_etf_index_fundamentals"))
+        explicit = [v.strip() for v in raw.split(",") if v.strip() and v.strip() != "default"]
+        chain = explicit or list(VENDOR_METHODS["get_etf_index_fundamentals"])
+        if "csindex" not in chain:
             return text
         from tradingagents.dataflows.vendors.csindex import point_in_time_summary
 
