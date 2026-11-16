@@ -42,6 +42,18 @@ def _timing(label: str) -> None:
         print(f"[timing] {label} {time.strftime('%H:%M:%S')}", file=sys.stderr, flush=True)
 
 
+def _live_view(layout):
+    """rich's Live at a terminal, and a no-op context for a pipe.
+
+    A pipe has no alternate screen; Live there only starts a refresh thread and
+    an alternate-screen teardown nobody can see, so skipping it keeps the
+    report tail immediate.
+    """
+    if not stdout_is_a_terminal(console):
+        return contextlib.nullcontext()
+    return Live(layout, refresh_per_second=4, screen=True)
+
+
 def _run_directory(config: dict, ticker: str, trade_date: str) -> Path:
     """Where this run writes, with the ticker validated as a path component.
 
@@ -112,14 +124,21 @@ def _build_run_config(selections: dict, checkpoint: bool | None) -> dict:
     return config
 
 
-def _warn_if_cn_news_missing(selections):
-    """Say at start-up, not at the first news call, that akshare is missing.
+def _warn_if_cn_news_missing(selections, config):
+    """Say at start-up that a chain which uses cn_news cannot use it.
 
-    Without it cn_news reports "not configured" and the news chain falls back to
-    Yahoo, which an A-share run usually cannot use; a warning here tells the
-    operator to install the extra before the run that will need it.
+    Only a chain that actually names cn_news is warned about, and the message
+    names the next vendor that will serve instead of assuming yfinance. The
+    language comes from the run's selection (the data-layer config is not set
+    until the graph is built), and the install hint is escaped so rich does not
+    swallow ``[cn]`` as a style tag.
     """
     if selections.get("asset_type") != "etf":
+        return
+    chain = [v.strip() for v in str(
+        config.get("data_vendors", {}).get("news_data", "")
+    ).split(",") if v.strip()]
+    if "cn_news" not in chain:
         return
     try:
         from tradingagents.dataflows.units import is_chinese
@@ -130,17 +149,17 @@ def _warn_if_cn_news_missing(selections):
         return
     if not reason:
         return
-    if is_chinese():
+    next_vendor = next((v for v in chain if v != "cn_news"), "the next configured vendor")
+    language = selections.get("output_language") or config.get("output_language")
+    hint = 'pip install "tradingagents[cn]"'
+    if is_chinese(language):
         detail = "akshare 未安装" if reason == "akshare is not installed" else reason
-        console.print(
-            f"[yellow]cn_news 不可用：{detail}；新闻将退回 yfinance。"
-            f"安装：pip install \"tradingagents[cn]\"[/yellow]"
-        )
+        message = f"cn_news 不可用: {detail},新闻将退回 {next_vendor}。安装: {hint}"
     else:
-        console.print(
-            f"[yellow]cn_news unavailable: {reason}; news will fall back to yfinance. "
-            f"Install with pip install \"tradingagents[cn]\"[/yellow]"
-        )
+        message = f"cn_news unavailable: {reason}; news will fall back to {next_vendor}. Install: {hint}"
+    from rich.markup import escape
+
+    console.print(f"[yellow]{escape(message)}[/yellow]")
 
 
 def run_analysis(checkpoint: bool | None = None, portfolio=None, flags=None):
@@ -158,8 +177,8 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None, flags=None):
 
     selections = get_user_selections(flags)
 
-    _warn_if_cn_news_missing(selections)
     config = _build_run_config(selections, checkpoint)
+    _warn_if_cn_news_missing(selections, config)
 
     stats_handler = StatsCallbackHandler()
 
@@ -237,9 +256,7 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None, flags=None):
     # by scrolling; the final report prints after this block, on the normal screen.
     # A pipe has no screen to draw into, so skip Live entirely there: its refresh
     # thread and alternate-screen teardown have no reader and only delay exit.
-    live = (Live(layout, refresh_per_second=4, screen=True)
-            if stdout_is_a_terminal(console) else contextlib.nullcontext())
-    with live:
+    with _live_view(layout):
         # Initial display
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 

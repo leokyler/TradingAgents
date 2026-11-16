@@ -238,3 +238,45 @@ def test_the_forced_structural_failure_lands_in_the_report_stdout_and_strict(tmp
     with pytest.raises(typer.Exit) as exc:
         _enforce_strict(result, {"strict": True})
     assert exc.value.exit_code == 1
+
+
+@pytest.mark.unit
+def test_the_forced_trader_failure_also_lands_in_its_report_and_strict(tmp_path, capsys):
+    """The same three points for the Trader agent the live run actually failed on."""
+    from tradingagents.agents.trader.trader import create_trader
+    from tradingagents.reporting import write_report_tree
+
+    class _Structured:
+        def invoke(self, prompt):
+            raise ValueError("forced trader schema failure")
+
+    llm = MagicMock()
+    llm.with_structured_output.return_value = _Structured()
+    llm.invoke.return_value = MagicMock(content="FINAL TRANSACTION PROPOSAL: **HOLD**")
+
+    result = create_trader(llm)({
+        "company_of_interest": "515070.SS",
+        "trade_date": "2026-11-13",
+        "asset_type": "etf",
+        "market_report": "",
+        "investment_plan": "**Recommendation**: Hold",
+    })
+    plan = result["trader_investment_plan"]
+    assert plan.startswith(FREETEXT_FALLBACK_MARKER)
+
+    write_report_tree(
+        {"trader_investment_plan": plan, "final_trade_decision": "**Rating**: Hold"},
+        "515070.SS", tmp_path, settings=None, html=False,
+    )
+    report = (tmp_path / "3_trading" / "trader.md").read_text(encoding="utf-8")
+    assert report.splitlines()[0] == FREETEXT_FALLBACK_MARKER
+
+    from cli.run import _enforce_strict, _report_structured_fallbacks
+
+    _report_structured_fallbacks(tmp_path / "message_tool.log")
+    assert "WARNING: Trader structured output failed" in capsys.readouterr().out
+
+    import typer
+    with pytest.raises(typer.Exit) as exc:
+        _enforce_strict(result, {"strict": True})
+    assert exc.value.exit_code == 1

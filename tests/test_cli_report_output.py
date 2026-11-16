@@ -183,13 +183,15 @@ def test_the_command_exits_one_and_names_the_available_analysts(monkeypatch):
 
 
 @pytest.mark.unit
-def test_a_pipe_run_does_not_start_the_rich_live_view():
+def test_a_pipe_run_does_not_start_the_rich_live_view(monkeypatch):
     """A pipe has no alternate screen; Live is skipped so its refresh thread and
     teardown cannot delay the exit after the report is written."""
-    import inspect
+    import contextlib
 
     from cli import run
 
-    source = inspect.getsource(run.run_analysis)
-    assert "stdout_is_a_terminal(console)" in source
-    assert "contextlib.nullcontext()" in source
+    monkeypatch.setattr(run, "stdout_is_a_terminal", lambda console: False)
+    assert isinstance(run._live_view(object()), contextlib.nullcontext)
+
+    monkeypatch.setattr(run, "stdout_is_a_terminal", lambda console: True)
+    assert isinstance(run._live_view(object()), run.Live)

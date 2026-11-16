@@ -210,8 +210,10 @@ def build_default_config() -> dict:
             "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)
             "prediction_markets": "polymarket",  # Options: polymarket (keyless)
             # Fund-level data for A-share ETFs. Eastmoney (keyless) serves the
-            # profile, the holdings and the basket valuation; Tushare serves the
-            # profile only, so list it *before* eastmoney rather than alone.
+            # profile, the holdings and the basket valuation; csindex is the
+            # second, index-level valuation source when the holdings page cannot
+            # be read; Tushare serves the profile only, so list it *before*
+            # eastmoney rather than alone.
             "etf_data": "eastmoney,csindex",
         },
         # Tool-level configuration (takes precedence over category-level)

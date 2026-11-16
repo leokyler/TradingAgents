@@ -10,24 +10,37 @@ drifting into two different notations.
 from __future__ import annotations
 
 
-def is_chinese() -> bool:
-    """Whether the run's configured output language is Chinese."""
-    from tradingagents.dataflows.config import get_config
+def is_chinese(language: str | None = None) -> bool:
+    """Whether the run's configured output language is Chinese.
 
-    language = str(get_config().get("output_language") or "").strip().lower()
-    return "中文" in language or language.startswith("zh") or "chinese" in language
+    ``language`` lets a caller that already has the selection use it without
+    reading the data-layer config (which the CLI sets only after the graph is
+    built).
+    """
+    if language is None:
+        from tradingagents.dataflows.config import get_config
+
+        language = get_config().get("output_language")
+    text = str(language or "").strip().lower()
+    return "中文" in text or text.startswith("zh") or "chinese" in text
 
 
-def lots(value: float) -> str:
-    """A share volume in lots (100 shares)."""
+def lots(value: float | None) -> str:
+    """A share count (shares) as exchange lots (100 shares)."""
+    if value is None:
+        return "n/a"
     return f"{value / 1e4:,.2f} 万手" if is_chinese() else f"{value / 1e4:,.2f} 10k lots"
 
 
-def shares(value: float) -> str:
+def shares(value: float | None) -> str:
     """A share count."""
+    if value is None:
+        return "n/a"
     return f"{value / 1e8:,.2f} 亿份" if is_chinese() else f"{value / 1e8:,.2f} 100m shares"
 
 
-def money(value: float) -> str:
+def money(value: float | None) -> str:
     """A CNY amount."""
+    if value is None:
+        return "n/a"
     return f"{value / 1e8:,.2f} 亿元" if is_chinese() else f"CNY {value / 1e8:,.2f} 100m"

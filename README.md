@@ -167,6 +167,8 @@ tradingagents` removes it. A-share news needs the optional `cn` extra:
 and the news chain falls through to Yahoo, which an A-share run usually cannot
 use; the CLI prints that warning at start-up. `csindex` (the second valuation
 source) also needs the `cn` extra. A-share prices and fund data need no extra.
+Set `TRADINGAGENTS_TIMING=1` to print phase timestamps on stderr when diagnosing
+a slow shutdown.
 
 The `.env` file is read from the directory the command is started in, so run it
 from the checkout, or export the `TRADINGAGENTS_*` variables and API keys.

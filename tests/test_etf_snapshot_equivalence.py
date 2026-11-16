@@ -265,12 +265,12 @@ def test_the_profile_uses_the_real_clock_and_the_daily_bars(monkeypatch):
 def test_one_snapshot_fetch_per_profile_call(monkeypatch):
     """The served block and the withheld notice render the same metrics object."""
     calls = []
-    metrics = {
+    metrics = eastmoney.ProfileMetrics(**{
         "code": "515070", "name": "人工智能ETF华夏", "price": 0.885, "prev": 0.902,
         "change": -0.017, "pct": -1.88, "volume": 1040351, "amount": 93694477.0,
         "shares": 7203000000.0, "market_value": 6374655000.0, "turnover": 1.44,
         "nav": 0.8853, "nav_date": "2026-11-13",
-    }
+    })
     monkeypatch.setattr(eastmoney, "_profile_metrics",
                         lambda code, secid: calls.append(1) or metrics)
     monkeypatch.setattr(eastmoney, "_point_in_time", lambda canonical, as_of: (False, ""))
@@ -293,12 +293,12 @@ def test_the_served_and_withheld_blocks_use_one_unit_style(monkeypatch):
     original = copy.deepcopy(config_module._config)
     try:
         set_config({"output_language": "中文"})
-        metrics = {
-            "code": "515070", "name": "人工智能ETF华夏", "price": 0.885, "prev": 0.902,
-            "change": -0.017, "pct": -1.88, "volume": 1040351, "amount": 93694477.0,
-            "shares": 7203000000.0, "market_value": 6374655000.0, "turnover": 1.44,
-            "nav": 0.8853, "nav_date": "2026-11-13",
-        }
+        metrics = eastmoney.ProfileMetrics(
+            code="515070", name="人工智能ETF华夏", price=0.885, prev=0.902,
+            change=-0.017, pct=-1.88, volume=1040351, amount=93694477.0,
+            shares=7203000000.0, market_value=6374655000.0, turnover=1.44,
+            nav=0.8853, nav_date="2026-11-13",
+        )
         monkeypatch.setattr(eastmoney, "_profile_metrics",
                             lambda code, secid: metrics)
         monkeypatch.setattr(eastmoney, "_point_in_time", lambda canonical, as_of: (True, ""))
@@ -315,3 +315,27 @@ def test_the_served_and_withheld_blocks_use_one_unit_style(monkeypatch):
             assert "100m shares" not in out
     finally:
         config_module._config = original
+
+
+@pytest.mark.unit
+def test_a_withheld_valuation_carries_the_dated_index_anchor(monkeypatch):
+    """A historical run cannot use the live snapshot, but the dated CSI multiple
+    is point-in-time safe and gives the analyst an anchor."""
+    monkeypatch.setattr(eastmoney, "_holdings_rows", lambda *a, **k: {
+        "report_date": "2026-09-30", "quarter": "2026年3季度",
+        "rows": [{"code": "600519", "name": "贵州茅台", "weight": 3.09}],
+    })
+    monkeypatch.setattr(eastmoney, "_covered_valuation", lambda rows: {
+        "covered": [], "pe": 30.17, "pb": 7.86, "roe": 0.26,
+        "disclosed_weight": 56.93, "covered_weight": 56.93,
+    })
+    monkeypatch.setattr(eastmoney, "session_clock", lambda *a: _fake_clock(after=3, days=3))
+    monkeypatch.setattr(
+        eastmoney, "_index_valuation_summary",
+        lambda canonical, as_of: "Point-in-time index valuation (CSIndex, 2026-11-11): PE (TTM) 45.98.",
+    )
+
+    out = eastmoney.get_etf_index_fundamentals("515070.SS", "2026-11-10")
+
+    assert "STRUCTURALLY_UNAVAILABLE" in out
+    assert "Point-in-time index valuation (CSIndex, 2026-11-11)" in out

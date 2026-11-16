@@ -3,14 +3,16 @@
 Eastmoney's fundf10 holdings page is the primary source for the disclosed
 basket, but it is one host and one page: a timeout there used to cost the ETF
 analyst its whole valuation block. CSI's own index-valuation series covers the
-same fund at the index level, is public, and is available through akshare
-(``stock_zh_index_value_csindex``). This vendor resolves the fund's benchmark
-from a second keyless source (THS fund basics), finds that benchmark in CSI's
-index catalogue, and serves its PE and dividend yield as of the analysis date.
+same fund at the index level and is public. This vendor resolves the fund's
+benchmark from a second keyless source (THS fund basics), finds that benchmark
+in CSI's index catalogue, and serves its PE and dividend yield as of the
+analysis date.
 
 It is a fallback, not a replacement: CSI publishes index PE and dividend yield,
 not PB or the constituent-weighted aggregate Eastmoney computes. The block says
-so, and never fabricates the missing multiples.
+so, and never fabricates the missing multiples. The same dated lookup also
+feeds a compact summary into a historical run's withheld valuation notice, so
+such a run still has a point-in-time valuation anchor.
 """
 
 from __future__ import annotations
@@ -18,9 +20,10 @@ from __future__ import annotations
 import functools
 import io
 import logging
+import queue
+import threading
 
 import pandas as pd
-import requests
 
 from tradingagents.dataflows.date_window import get_current_date
 from tradingagents.dataflows.dates import parse_day
@@ -37,9 +40,14 @@ logger = logging.getLogger(__name__)
 
 _CN_PIP_HINT = 'pip install "tradingagents[cn]"'
 
+# Bound the two akshare metadata lookups as well as the workbook: neither
+# exposes a timeout, and a stalled resolution would defeat the point of a
+# fallback. A daemon worker lets the caller stop waiting.
+_LOOKUP_TIMEOUT = 12.0
+
 # CSI publishes the valuation series as one .xls per index. akshare reads it
 # without a request timeout, which can stall the fallback for a minute; the
-# fork fetches the same public file with a bounded request instead.
+# fork fetches the same public file through the bounded transport instead.
 _CSI_INDICATOR_URL = (
     "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/file/"
     "autofile/indicator/{code}indicator.xls"
@@ -65,6 +73,33 @@ def _import_akshare():
     return akshare
 
 
+def _bounded(label: str, fn, *args, timeout: float = _LOOKUP_TIMEOUT, **kwargs):
+    """Run a blocking akshare lookup with a wall-clock bound.
+
+    akshare's metadata helpers set no request timeout. The worker is a daemon,
+    so a stuck request cannot hold the run open; the caller raises the same
+    typed outage it would for a failed lookup.
+    """
+    answer: queue.Queue = queue.Queue(maxsize=1)
+
+    def work():
+        try:
+            answer.put((True, fn(*args, **kwargs)))
+        except BaseException as exc:  # noqa: BLE001 - handed to the caller
+            answer.put((False, exc))
+
+    threading.Thread(target=work, name=f"csindex-{label}", daemon=True).start()
+    try:
+        ok, value = answer.get(timeout=timeout)
+    except queue.Empty as exc:
+        raise VendorUnavailableError(
+            f"{label} did not answer within {timeout:.0f}s"
+        ) from exc
+    if not ok:
+        raise VendorUnavailableError(f"{label} failed: {value}") from value
+    return value
+
+
 @functools.lru_cache(maxsize=256)
 def _benchmark_name(fund_code: str) -> str:
     """The fund's benchmark text, from THS's keyless fund basics."""
@@ -72,10 +107,7 @@ def _benchmark_name(fund_code: str) -> str:
     fetch = getattr(akshare, "fund_info_ths", None)
     if not callable(fetch):
         raise VendorUnavailableError("the installed akshare has no fund_info_ths")
-    try:
-        frame = fetch(symbol=fund_code)
-    except Exception as exc:  # noqa: BLE001
-        raise VendorUnavailableError(f"akshare fund_info_ths failed: {exc}") from exc
+    frame = _bounded("akshare fund_info_ths", fetch, symbol=fund_code)
     rows = frame.to_dict("records") if hasattr(frame, "to_dict") else []
     for row in rows:
         if str(row.get("字段") or "").strip() == "业绩比较基准":
@@ -92,10 +124,7 @@ def _index_catalogue(akshare) -> dict[str, str]:
     fetch = getattr(akshare, "index_csindex_all", None)
     if not callable(fetch):
         raise VendorUnavailableError("the installed akshare has no index_csindex_all")
-    try:
-        frame = fetch()
-    except Exception as exc:  # noqa: BLE001
-        raise VendorUnavailableError(f"akshare index_csindex_all failed: {exc}") from exc
+    frame = _bounded("akshare index_csindex_all", fetch)
     lookup: dict[str, str] = {}
     for row in frame.to_dict("records"):
         code = str(row.get("指数代码") or "").strip()
@@ -107,30 +136,24 @@ def _index_catalogue(akshare) -> dict[str, str]:
 
 
 def _fetch_csindex(index_code: str) -> pd.DataFrame:
-    """The index's public valuation workbook, read with a bounded timeout."""
+    """The index's public valuation workbook, read through the bounded transport."""
     url = _CSI_INDICATOR_URL.format(code=index_code)
-    last: Exception | None = None
-    for attempt in range(2):   # one retry, like the primary valuation endpoint
-        try:
-            response = transport.session().get(url, timeout=_CSI_TIMEOUT)
-            response.raise_for_status()
-            break
-        except requests.RequestException as exc:
-            last = exc
-            if attempt == 0:
-                import time
-                time.sleep(0.3)
-    else:
+    try:
+        content = transport.get_bytes(url, timeout=_CSI_TIMEOUT)
+    except Exception as exc:  # noqa: BLE001 - transport already typed its failure
         raise VendorUnavailableError(
             f"CSIndex valuation request failed after {_CSI_TIMEOUT:.0f}s "
-            f"(retried once): {last}"
-        ) from last
+            f"(retried once): {exc}"
+        ) from exc
     try:
-        frame = pd.read_excel(io.BytesIO(response.content))
+        frame = pd.read_excel(io.BytesIO(content))
     except Exception as exc:  # noqa: BLE001 - a moved/corrupt file is an outage
         raise VendorUnavailableError(f"CSIndex valuation file is unreadable: {exc}") from exc
-    if frame.shape[1] < len(_CSI_COLUMNS):
-        raise VendorUnavailableError("CSIndex valuation file has unexpected columns")
+    if frame.shape[1] != len(_CSI_COLUMNS):
+        raise VendorUnavailableError(
+            f"CSIndex valuation file has {frame.shape[1]} columns, expected "
+            f"{len(_CSI_COLUMNS)}; refusing to guess their meaning"
+        )
     frame.columns = _CSI_COLUMNS
     frame["日期"] = pd.to_datetime(frame["日期"].astype(str), format="%Y%m%d", errors="coerce")
     for column in ("市盈率1", "市盈率2", "股息率1", "股息率2"):
@@ -157,15 +180,8 @@ def _index_code(fund_code: str, akshare) -> tuple[str, str]:
     return code, benchmark
 
 
-def get_etf_index_fundamentals(ticker: str, as_of_date: str | None = None,
-                               limit: int = 10) -> str:
-    """Index-level PE and dividend yield for an A-share ETF's benchmark.
-
-    Dated point-in-time: only valuations whose date is on or before the run date
-    are served. The block states that this is the index's own multiple, not the
-    constituent-weighted aggregate the primary vendor computes, and that this
-    source does not publish PB or ROE.
-    """
+def _valuation_data(ticker: str, as_of_date: str | None) -> dict:
+    """Resolve the fund, its benchmark and the latest dated CSI valuation row."""
     canonical = normalize_symbol(ticker)
     if etf_code(canonical) is None:
         raise NoMarketDataError(
@@ -181,7 +197,7 @@ def get_etf_index_fundamentals(ticker: str, as_of_date: str | None = None,
     code = str(etf_code(canonical))
     index_code, index_name = _index_code(code, akshare)
     frame = _fetch_csindex(index_code)
-    if frame is None or frame.empty:
+    if frame.empty:
         raise NoMarketDataError(
             canonical, canonical,
             f"CSI returned no valuation rows for index {index_code}",
@@ -189,7 +205,8 @@ def get_etf_index_fundamentals(ticker: str, as_of_date: str | None = None,
 
     rows = []
     for row in frame.to_dict("records"):
-        day = row.get("日期").date() if hasattr(row.get("日期"), "date") else parse_day(row.get("日期"))
+        stamp = row.get("日期")
+        day = stamp.date() if hasattr(stamp, "date") else parse_day(stamp)
         if day is not None and day <= as_of:
             rows.append((day, row))
     if not rows:
@@ -207,25 +224,65 @@ def get_etf_index_fundamentals(ticker: str, as_of_date: str | None = None,
             return None
         return value if value > 0 else None
 
-    pe_static, pe_ttm = number("市盈率1"), number("市盈率2")
-    yield_static, yield_ttm = number("股息率1"), number("股息率2")
+    return {
+        "canonical": canonical,
+        "index_code": index_code,
+        "index_name": index_name,
+        "day": day,
+        "pe_static": number("市盈率1"),
+        "pe_ttm": number("市盈率2"),
+        "yield_static": number("股息率1"),
+        "yield_ttm": number("股息率2"),
+    }
 
+
+def point_in_time_summary(ticker: str, as_of_date: str | None) -> str:
+    """A compact dated index-valuation line, for a withheld primary block.
+
+    Raises the same typed errors as the full block; a caller that already has a
+    notice appends this only when it succeeds.
+    """
+    data = _valuation_data(ticker, as_of_date)
+    parts = []
+    if data["pe_static"]:
+        parts.append(f"PE (static) {data['pe_static']:.2f}")
+    if data["pe_ttm"]:
+        parts.append(f"PE (TTM) {data['pe_ttm']:.2f}")
+    if data["yield_ttm"]:
+        parts.append(f"dividend yield (TTM) {data['yield_ttm']:.2f}%")
+    detail = ", ".join(parts) if parts else "no PE or dividend-yield value"
+    return (
+        f"Point-in-time index valuation (CSIndex, {data['day']:%Y-%m-%d}): "
+        f"{data['index_name']} ({data['index_code']}): {detail}. "
+        "This is the index's own multiple, not the constituent-weighted aggregate."
+    )
+
+
+def get_etf_index_fundamentals(ticker: str, as_of_date: str | None = None) -> str:
+    """Index-level PE and dividend yield for an A-share ETF's benchmark.
+
+    Dated point-in-time: only valuations whose date is on or before the run date
+    are served. The block states that this is the index's own multiple, not the
+    constituent-weighted aggregate the primary vendor computes, and that this
+    source does not publish PB or ROE.
+    """
+    data = _valuation_data(ticker, as_of_date)
     lines = [
-        f"# ETF index fundamentals for {canonical} "
-        f"(CSI index valuation: {index_name} {index_code})",
-        f"# Source: csindex via akshare; valuation as of {day:%Y-%m-%d}.",
+        f"# ETF index fundamentals for {data['canonical']} "
+        f"(CSI index valuation: {data['index_name']} {data['index_code']})",
+        f"# Source: csindex via akshare; valuation as of {data['day']:%Y-%m-%d}.",
         "",
-        f"- **Index**: {index_name} ({index_code})",
-        f"- **Valuation date**: {day:%Y-%m-%d}",
+        f"- **Index**: {data['index_name']} ({data['index_code']})",
+        f"- **Valuation date**: {data['day']:%Y-%m-%d}",
     ]
-    if pe_static:
-        lines.append(f"- **PE (static)**: {pe_static:.2f}")
-    if pe_ttm:
-        lines.append(f"- **PE (TTM)**: {pe_ttm:.2f}")
-    if yield_static:
-        lines.append(f"- **Dividend yield (static)**: {yield_static:.2f}%")
-    if yield_ttm:
-        lines.append(f"- **Dividend yield (TTM)**: {yield_ttm:.2f}%")
+    if data["pe_static"]:
+        lines.append(f"- **PE (static)**: {data['pe_static']:.2f}")
+    if data["pe_ttm"]:
+        lines.append(f"- **PE (TTM)**: {data['pe_ttm']:.2f}")
+    if data["yield_static"]:
+        lines.append(f"- **Dividend yield (static)**: {data['yield_static']:.2f}%")
+    if data["yield_ttm"]:
+        lines.append(f"- **Dividend yield (TTM)**: {data['yield_ttm']:.2f}%")
     lines += [
         "",
         "Notes:",

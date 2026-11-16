@@ -124,3 +124,27 @@ def test_the_router_falls_back_to_csindex_when_eastmoney_times_out():
 @pytest.mark.unit
 def test_the_default_etf_chain_offers_the_second_source():
     assert "csindex" in default_config.DEFAULT_CONFIG["data_vendors"]["etf_data"]
+
+
+@pytest.mark.unit
+def test_a_stalled_metadata_lookup_is_bounded(monkeypatch):
+    import time
+
+    def stalled(**kwargs):
+        time.sleep(2)
+        return None
+
+    with pytest.raises(VendorUnavailableError, match="did not answer within"):
+        csindex._bounded("stalled", stalled, timeout=0.05)
+
+
+@pytest.mark.unit
+def test_an_unexpected_column_count_is_a_vendor_error(monkeypatch):
+    import io as _io
+
+    buffer = _io.BytesIO()
+    pd.DataFrame([[1] * 11]).to_excel(buffer, index=False)
+    monkeypatch.setattr(csindex.transport, "get_bytes", lambda *a, **k: buffer.getvalue())
+
+    with pytest.raises(VendorUnavailableError, match="columns, expected"):
+        csindex._fetch_csindex("930713")

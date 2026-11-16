@@ -99,10 +99,6 @@ def _pct(value: float | None) -> str:
     return "n/a" if value is None else f"{value:+.2f}%"
 
 
-def _money(value: float | None) -> str:
-    return "n/a" if value is None else units.money(value)
-
-
 def build_price_window(ticker: str, trade_date: str) -> str:
     """The deterministic price block, or a placeholder naming what failed.
 
@@ -155,7 +151,7 @@ def build_price_window(ticker: str, trade_date: str) -> str:
         f"- **60-session high**: {high:.3f} CNY",
         f"- **60-session low**: {low:.3f} CNY",
         f"- **Drawdown from the 60-session high**: {_pct(drawdown)}",
-        f"- **Average daily turnover over the last 20 sessions**: {_money(average_turnover)}"
+        f"- **Average daily turnover over the last 20 sessions**: {units.money(average_turnover)}"
         + (f" ({_AMOUNT_NOTE})" if estimated else ""),
         f"- **Sessions used**: {len(window)} from {window['Date'].iloc[0]:%Y-%m-%d} "
         f"to {last_date:%Y-%m-%d} (forward-adjusted where available)",

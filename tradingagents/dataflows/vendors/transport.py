@@ -72,20 +72,21 @@ def session() -> requests.Session:
     return _SESSION
 
 
-def _fetch(url: str, params: dict | None, headers: dict, timeout: float, browser: bool) -> str:
+def _fetch(url: str, params: dict | None, headers: dict, timeout: float,
+           browser: bool, binary: bool = False):
     """One HTTP GET, browser-fingerprinted when asked and available."""
     if browser and _curl_cffi is not None:
         response = _curl_cffi.get(url, params=params, headers=headers,
                                   timeout=timeout, impersonate="chrome")
         if response.status_code >= 400:
             raise VendorUnavailableError(f"{url} returned HTTP {response.status_code}")
-        return response.text
+        return response.content if binary else response.text
     response = session().get(url, params=params, headers=headers, timeout=timeout)
     response.raise_for_status()
-    return response.text
+    return response.content if binary else response.text
 
 
-def get(
+def _request(
     url: str,
     *,
     params: dict | None = None,
@@ -93,14 +94,9 @@ def get(
     referer: str | None = None,
     timeout: float = 10.0,
     browser: bool = False,
-) -> str:
-    """GET ``url``, spacing requests and tripping a per-host breaker on failure.
-
-    An HTTP error answer is not evidence about the host (the path may be wrong,
-    the id stale), so it opens no breaker; only a failure of the connection
-    itself — timeout, reset, empty reply — does, because retrying a blocked IP
-    only extends the block.
-    """
+    binary: bool = False,
+):
+    """The shared GET: spacing, per-host breaker, one retry, typed failure."""
     headers = dict(headers or {})
     if referer:
         headers["Referer"] = referer
@@ -123,7 +119,7 @@ def get(
     # single re-request covers it without hiding a real outage.
     for attempt in range(2):
         try:
-            body = _fetch(url, params, headers, timeout, browser)
+            body = _fetch(url, params, headers, timeout, browser, binary)
         except _TRANSPORT_ERRORS + (VendorUnavailableError,) as exc:
             last = exc
             if attempt == 0:
@@ -137,6 +133,44 @@ def get(
         with _host_state_lock:
             _host_blocked_until[host] = time.monotonic() + HOST_COOLDOWN_SECONDS
     raise VendorUnavailableError(f"request failed for {url}: {last}") from last
+
+
+def get(
+    url: str,
+    *,
+    params: dict | None = None,
+    headers: dict | None = None,
+    referer: str | None = None,
+    timeout: float = 10.0,
+    browser: bool = False,
+) -> str:
+    """GET ``url`` as text, spacing requests and tripping a per-host breaker.
+
+    An HTTP error answer is not evidence about the host (the path may be wrong,
+    the id stale), so it opens no breaker; only a failure of the connection
+    itself — timeout, reset, empty reply — does, because retrying a blocked IP
+    only extends the block.
+    """
+    return _request(url, params=params, headers=headers, referer=referer,
+                    timeout=timeout, browser=browser)
+
+
+def get_bytes(
+    url: str,
+    *,
+    params: dict | None = None,
+    headers: dict | None = None,
+    referer: str | None = None,
+    timeout: float = 10.0,
+    browser: bool = False,
+) -> bytes:
+    """GET ``url`` as bytes, with the same spacing/breaker/retry as :func:`get`.
+
+    Public workbooks (the CSI valuation .xls) are binary; they must not lose
+    the transport's per-host discipline just because they are not text.
+    """
+    return _request(url, params=params, headers=headers, referer=referer,
+                    timeout=timeout, browser=browser, binary=True)
 
 
 def json_body(body: str, source: str) -> Any:

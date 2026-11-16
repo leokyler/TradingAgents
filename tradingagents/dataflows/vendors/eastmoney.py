@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime
 
 from tradingagents.dataflows import units
@@ -86,6 +87,15 @@ def _get(url: str, *, params: dict | None = None, referer: str | None = None,
 
 def _is_timeout(exc: Exception) -> bool:
     """Whether a transport failure was a timeout rather than a refused connection."""
+    cause = exc.__cause__
+    if isinstance(cause, (TimeoutError,)):
+        return True
+    try:
+        import requests
+        if isinstance(cause, requests.Timeout):
+            return True
+    except ImportError:  # pragma: no cover - requests is a declared dependency
+        pass
     text = str(exc).lower()
     return "timed out" in text or "timeout" in text
 
@@ -135,13 +145,6 @@ def _as_float(value) -> float | None:
         return float(str(value).replace(",", ""))
     except (TypeError, ValueError):
         return None
-
-
-def _fmt(value: float | None, unit: str = "", digits: int = 2) -> str:
-    if value is None:
-        return "n/a"
-    text = f"{value:,.{digits}f}".rstrip("0").rstrip(".")
-    return f"{text}{unit}"
 
 
 def _point_in_time(canonical: str, as_of_date: str | None) -> tuple[bool, str]:
@@ -204,6 +207,25 @@ def _data_unavailable(what: str, canonical: str, as_of_date: str, exc: Exception
     )
 
 
+@dataclass(frozen=True)
+class ProfileMetrics:
+    """One quote's profile figures, read once and rendered by both branches."""
+
+    code: str
+    name: str
+    price: float | None
+    prev: float | None
+    change: float | None
+    pct: float | None
+    volume: float | None
+    amount: float | None
+    shares: float | None
+    market_value: float | None
+    turnover: float | None
+    nav: float | None
+    nav_date: str
+
+
 def _premium(price: float | None, nav: float | None) -> tuple[float, str] | None:
     """The premium/discount a price implies against a published NAV."""
     if price is None or not nav:
@@ -212,48 +234,47 @@ def _premium(price: float | None, nav: float | None) -> tuple[float, str] | None
     return premium, ("premium" if premium > 0 else "discount")
 
 
-def _profile_metrics(code: str, secid: str) -> dict:
+def _profile_metrics(code: str, secid: str) -> ProfileMetrics:
     """The profile's numbers, read once so the served and withheld blocks agree."""
     quote = _quote(secid)
     nav_pair = _latest_nav(code)
     nav, nav_date = nav_pair if nav_pair else (None, "")
-    return {
-        "code": code,
-        "name": quote.get("f58") or code,
-        "price": _as_float(quote.get("f43")),
-        "prev": _as_float(quote.get("f60")),
-        "change": _as_float(quote.get("f169")),
-        "pct": _as_float(quote.get("f170")),
-        "volume": _as_float(quote.get("f47")),      # lots (100 shares)
-        "amount": _as_float(quote.get("f48")),      # CNY
-        "shares": _as_float(quote.get("f84")),
-        "market_value": _as_float(quote.get("f116")),
-        "turnover": _as_float(quote.get("f168")),   # percent
-        "nav": nav,
-        "nav_date": nav_date,
-    }
+    return ProfileMetrics(
+        code=code,
+        name=quote.get("f58") or code,
+        price=_as_float(quote.get("f43")),
+        prev=_as_float(quote.get("f60")),
+        change=_as_float(quote.get("f169")),
+        pct=_as_float(quote.get("f170")),
+        volume=_as_float(quote.get("f47")),      # lots (100 shares)
+        amount=_as_float(quote.get("f48")),      # CNY
+        shares=_as_float(quote.get("f84")),
+        market_value=_as_float(quote.get("f116")),
+        turnover=_as_float(quote.get("f168")),   # percent
+        nav=nav,
+        nav_date=nav_date,
+    )
 
 
-def _profile_snapshot_lines(metrics: dict) -> list[str]:
+def _profile_snapshot_lines(metrics: ProfileMetrics) -> list[str]:
     """Current profile figures for a withheld run's nearest-snapshot block.
 
     It renders the same metrics the served profile would, so a report never
     carries two snapshots (and two share counts) taken seconds apart.
     """
-    code = metrics["code"]
-    price, nav = metrics["price"], metrics["nav"]
-    lines = [f"Snapshot values for {code} ({metrics['name']}):"]
+    price, nav = metrics.price, metrics.nav
+    lines = [f"Snapshot values for {metrics.code} ({metrics.name}):"]
     if price is not None:
         lines.append(f"- **Price**: {price:.3f} CNY")
-    if metrics["volume"] is not None and metrics["amount"] is not None:
-        lines.append(f"- **Session volume**: {units.lots(metrics['volume'])} "
-                     f"({units.money(metrics['amount'])} traded)")
-    if metrics["shares"] is not None:
-        lines.append(f"- **Shares outstanding**: {units.shares(metrics['shares'])}")
-    if metrics["market_value"] is not None:
-        lines.append(f"- **Fund size (shares x price)**: {units.money(metrics['market_value'])}")
+    if metrics.volume is not None and metrics.amount is not None:
+        lines.append(f"- **Session volume**: {units.lots(metrics.volume)} "
+                     f"({units.money(metrics.amount)} traded)")
+    if metrics.shares is not None:
+        lines.append(f"- **Shares outstanding**: {units.shares(metrics.shares)}")
+    if metrics.market_value is not None:
+        lines.append(f"- **Fund size (shares x price)**: {units.money(metrics.market_value)}")
     if nav is not None:
-        lines.append(f"- **Latest published NAV**: {nav:.4f} ({metrics['nav_date']})")
+        lines.append(f"- **Latest published NAV**: {nav:.4f} ({metrics.nav_date})")
         premium = _premium(price, nav)
         if premium is not None:
             value, state = premium
@@ -321,13 +342,13 @@ def get_etf_profile(ticker: str, as_of_date: str | None = None) -> str:
         clock = session_clock(canonical, as_of_date or "")
         detail = "\n".join(_profile_snapshot_lines(metrics))
         return _structural_notice("ETF profile", canonical, as_of_date or "", clock, detail)
-    name = metrics["name"]
-    price, prev = metrics["price"], metrics["prev"]
-    change, pct = metrics["change"], metrics["pct"]
-    volume, amount = metrics["volume"], metrics["amount"]
-    shares, market_value = metrics["shares"], metrics["market_value"]
-    turnover = metrics["turnover"]
-    nav, nav_date = metrics["nav"], metrics["nav_date"]
+    name = metrics.name
+    price, prev = metrics.price, metrics.prev
+    change, pct = metrics.change, metrics.pct
+    volume, amount = metrics.volume, metrics.amount
+    shares, market_value = metrics.shares, metrics.market_value
+    turnover = metrics.turnover
+    nav, nav_date = metrics.nav, metrics.nav_date
 
     lines = [f"# ETF profile for {canonical} ({name})"]
     if note:
@@ -555,6 +576,17 @@ def _covered_valuation(rows: list[dict]) -> dict | None:
     }
 
 
+def _index_valuation_summary(canonical: str, as_of_date: str | None) -> str:
+    """The dated CSI index multiple, or "" when the second source cannot answer."""
+    try:
+        from tradingagents.dataflows.vendors.csindex import point_in_time_summary
+
+        return point_in_time_summary(canonical, as_of_date)
+    except Exception as exc:  # noqa: BLE001 - the notice is still useful without it
+        logger.info("ETF Analyst: no dated index valuation for %s: %s", canonical, exc)
+        return ""
+
+
 def _valuation_snapshot_lines(code: str, limit: int) -> list[str]:
     """Present-day basket valuation, for the nearest-snapshot block of a withheld run."""
     current = _holdings_rows(code, None, limit)
@@ -606,6 +638,9 @@ def get_etf_index_fundamentals(ticker: str, as_of_date: str | None = None, limit
             detail = "\n".join(_valuation_snapshot_lines(code, limit))
         except Exception as exc:  # noqa: BLE001 - report the failed read, don't end the run
             return _data_unavailable("ETF index fundamentals", canonical, as_of_date or "", exc)
+        anchor = _index_valuation_summary(canonical, as_of_date)
+        if anchor:
+            detail = f"{detail}\n\n{anchor}"
         return _structural_notice(
             "ETF index fundamentals", canonical, as_of_date or "", clock, detail
         )

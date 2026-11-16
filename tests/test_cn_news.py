@@ -374,12 +374,27 @@ def test_a_missing_akshare_warns_at_cli_startup(monkeypatch, capsys):
     from tradingagents.dataflows.vendors import cn_news
 
     monkeypatch.setattr(cn_news, "missing_dependency", lambda: "akshare is not installed")
-    monkeypatch.setattr(units, "is_chinese", lambda: True)
+    monkeypatch.setattr(units, "is_chinese", lambda language=None: True)
+    config = {"data_vendors": {"news_data": "cn_news,yfinance"}, "output_language": "中文"}
 
-    run._warn_if_cn_news_missing({"asset_type": "etf"})
+    run._warn_if_cn_news_missing(
+        {"asset_type": "etf", "output_language": "中文"}, config
+    )
     out = capsys.readouterr().out
-    assert "cn_news 不可用" in out
-    assert "yfinance" in out
+    flat = " ".join(out.split())
+    assert "cn_news 不可用" in flat
+    assert "yfinance" in flat
+    assert 'pip install "tradingagents[cn]"' in flat   # rich must not eat [cn]
 
-    run._warn_if_cn_news_missing({"asset_type": "stock"})
+    run._warn_if_cn_news_missing(
+        {"asset_type": "etf", "output_language": "中文"},
+        {"data_vendors": {"news_data": "cn_news,alpha_vantage"}},
+    )
+    assert "alpha_vantage" in capsys.readouterr().out
+
+    run._warn_if_cn_news_missing(
+        {"asset_type": "etf", "output_language": "中文"},
+        {"data_vendors": {"news_data": "yfinance"}},
+    )
+    run._warn_if_cn_news_missing({"asset_type": "stock", "output_language": "中文"}, config)
     assert capsys.readouterr().out == ""

@@ -59,9 +59,9 @@ Every entry below is a deliberate edit to an upstream file, and the list is mean
 | `llm_clients/openai_client.py` | one condition: the native-OpenAI model-name gate skips the gateway | the gateway accepts effort levels native OpenAI would reject |
 | `graph/trading_graph.py` | `record_decision` runs the gate; the state log carries `etf_report`; one warning when a fund run selects no ETF analyst | the gate must sit on the path both the CLI and the API share |
 | `cli/{main,display}.py` | one help string, the analyst registries' entries, the `env` command registration, the `--strict` flag, and one non-tty branch calling `cli/plain_report.py` | additive, listed for completeness |
-| `cli/run.py` | `--strict` exit code, the fallback warning line, the A-share ETF `cn_news` chain, the start-up akshare warning, and the non-tty Live skip | one post-run check and a few per-run CLI decisions; the policies live in the fork modules |
+| `cli/run.py` | `--strict` exit code, the fallback warning line, the A-share ETF `cn_news` chain, the start-up akshare warning, the non-tty Live skip, and the opt-in `TRADINGAGENTS_TIMING` phase markers | one post-run check and a few per-run CLI decisions; the policies live in the fork modules |
 | `tradingagents/__init__.py` | a few added lines at the end call `load_user_env()` after the two upstream loaders | additive, listed for completeness |
-| `default_config.py` | new keys only (`evidence_gate`, the tier efforts, `etf_data`) | purely additive; `news_data` stays the upstream `yfinance` chain |
+| `default_config.py` | new keys only (`evidence_gate`, the tier efforts, `etf_data`), and the `etf_data` default now names `eastmoney,csindex` | additive; `news_data` stays the upstream `yfinance` chain, and the second valuation source is listed behind the primary |
 
 ## Syncing
 
