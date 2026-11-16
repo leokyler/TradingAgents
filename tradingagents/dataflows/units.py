@@ -26,7 +26,7 @@ def is_chinese(language: str | None = None) -> bool:
 
 
 def lots(value: float | None) -> str:
-    """A share count (shares) as exchange lots (100 shares)."""
+    """A turnover volume in exchange lots (100 shares)."""
     if value is None:
         return "n/a"
     return f"{value / 1e4:,.2f} 万手" if is_chinese() else f"{value / 1e4:,.2f} 10k lots"

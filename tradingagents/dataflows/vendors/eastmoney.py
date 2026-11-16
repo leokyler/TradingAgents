@@ -576,17 +576,6 @@ def _covered_valuation(rows: list[dict]) -> dict | None:
     }
 
 
-def _index_valuation_summary(canonical: str, as_of_date: str | None) -> str:
-    """The dated CSI index multiple, or "" when the second source cannot answer."""
-    try:
-        from tradingagents.dataflows.vendors.csindex import point_in_time_summary
-
-        return point_in_time_summary(canonical, as_of_date)
-    except Exception as exc:  # noqa: BLE001 - the notice is still useful without it
-        logger.info("ETF Analyst: no dated index valuation for %s: %s", canonical, exc)
-        return ""
-
-
 def _valuation_snapshot_lines(code: str, limit: int) -> list[str]:
     """Present-day basket valuation, for the nearest-snapshot block of a withheld run."""
     current = _holdings_rows(code, None, limit)
@@ -638,9 +627,6 @@ def get_etf_index_fundamentals(ticker: str, as_of_date: str | None = None, limit
             detail = "\n".join(_valuation_snapshot_lines(code, limit))
         except Exception as exc:  # noqa: BLE001 - report the failed read, don't end the run
             return _data_unavailable("ETF index fundamentals", canonical, as_of_date or "", exc)
-        anchor = _index_valuation_summary(canonical, as_of_date)
-        if anchor:
-            detail = f"{detail}\n\n{anchor}"
         return _structural_notice(
             "ETF index fundamentals", canonical, as_of_date or "", clock, detail
         )

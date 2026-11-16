@@ -318,9 +318,8 @@ def test_the_served_and_withheld_blocks_use_one_unit_style(monkeypatch):
 
 
 @pytest.mark.unit
-def test_a_withheld_valuation_carries_the_dated_index_anchor(monkeypatch):
-    """A historical run cannot use the live snapshot, but the dated CSI multiple
-    is point-in-time safe and gives the analyst an anchor."""
+def test_a_withheld_valuation_does_not_reach_a_vendor_outside_the_chain(monkeypatch):
+    """A withheld notice is Eastmoney's answer; it must not call csindex itself."""
     monkeypatch.setattr(eastmoney, "_holdings_rows", lambda *a, **k: {
         "report_date": "2026-09-30", "quarter": "2026年3季度",
         "rows": [{"code": "600519", "name": "贵州茅台", "weight": 3.09}],
@@ -330,12 +329,15 @@ def test_a_withheld_valuation_carries_the_dated_index_anchor(monkeypatch):
         "disclosed_weight": 56.93, "covered_weight": 56.93,
     })
     monkeypatch.setattr(eastmoney, "session_clock", lambda *a: _fake_clock(after=3, days=3))
-    monkeypatch.setattr(
-        eastmoney, "_index_valuation_summary",
-        lambda canonical, as_of: "Point-in-time index valuation (CSIndex, 2026-11-11): PE (TTM) 45.98.",
-    )
+
+    from tradingagents.dataflows.vendors import csindex
+
+    def must_not_run(*args, **kwargs):
+        raise AssertionError("eastmoney reached csindex directly")
+
+    monkeypatch.setattr(csindex, "point_in_time_summary", must_not_run)
 
     out = eastmoney.get_etf_index_fundamentals("515070.SS", "2026-11-10")
 
     assert "STRUCTURALLY_UNAVAILABLE" in out
-    assert "Point-in-time index valuation (CSIndex, 2026-11-11)" in out
+    assert "Point-in-time index valuation" not in out
