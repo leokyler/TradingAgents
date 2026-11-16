@@ -7,7 +7,7 @@ import pytest
 
 from tradingagents.agents.context import build_instrument_context
 from tradingagents.dataflows import date_window
-from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.dataflows.errors import NoMarketDataError, VendorUnavailableError
 from tradingagents.dataflows.etf import etf_code, is_a_share_etf
 from tradingagents.dataflows.vendors import eastmoney
 from tradingagents.dataflows.vendors.eastmoney import eastmoney_secid, stock_secid
@@ -80,7 +80,7 @@ _HOLDINGS_PAGE = """var apidata={ content:"<div class='box'>
 
 def _fake_get(pages):
     """An ``eastmoney._get`` replacement keyed by the first matching URL fragment."""
-    def fake(url, *, params=None, referer=None):
+    def fake(url, *, params=None, referer=None, timeout=None):
         for fragment, body in pages.items():
             if fragment in url:
                 return body if isinstance(body, str) else json.dumps(body)
@@ -108,8 +108,8 @@ class TestEtfProfile(unittest.TestCase):
         out = self._call()
         self.assertIn("沪深300ETF华泰柏瑞", out)
         self.assertIn("4.114", out)
-        self.assertIn("463.42 亿份", out)
-        self.assertIn("1,906.53 亿元", out)
+        self.assertIn("463.42 100m shares", out)
+        self.assertIn("CNY 1,906.53 100m", out)
         self.assertIn("4.1528", out)
         # (4.114 - 4.1528) / 4.1528 = -0.934%
         self.assertIn("-0.93%", out)
@@ -166,7 +166,7 @@ class TestEtfHoldings(unittest.TestCase):
 @pytest.mark.unit
 class TestEtfBasketValuation(unittest.TestCase):
     def test_aggregate_is_capital_weighted_and_states_coverage(self):
-        def fake(url, *, params=None, referer=None):
+        def fake(url, *, params=None, referer=None, timeout=None):
             if eastmoney._HOLDINGS_URL in url:
                 return _HOLDINGS_PAGE
             if params and params.get("secid") == "1.600519":
@@ -218,7 +218,7 @@ _EMPTY_PAGE = 'var apidata={ content:"",rc:0};'
 @pytest.mark.unit
 class TestFundTypeDisclosure(unittest.TestCase):
     def _holdings(self, ticker):
-        def fake(url, *, params=None, referer=None):
+        def fake(url, *, params=None, referer=None, timeout=None):
             if eastmoney._HOLDINGS_URL not in url:
                 raise AssertionError(url)
             if params.get("code") == "518880":
@@ -326,3 +326,16 @@ class TestFundRunShapeWarning(unittest.TestCase):
         graph = self._graph(["market", "news"])
         with self.assertNoLogs("tradingagents.graph.trading_graph", level="WARNING"):
             graph._warn_if_asset_type_has_no_analyst("stock")
+
+
+@pytest.mark.unit
+def test_a_timed_out_holdings_page_says_so_and_is_not_no_data(monkeypatch):
+    """The valuation block must distinguish a slow fundf10 from a fund with no basket."""
+    monkeypatch.setattr(eastmoney, "is_historical", lambda date: False)
+
+    def timed_out(*args, **kwargs):
+        raise VendorUnavailableError("request failed for fundf10: Operation timed out")
+
+    monkeypatch.setattr(eastmoney, "_holdings_rows", timed_out)
+    with pytest.raises(VendorUnavailableError, match="timed out after 12s \\(retried once\\)"):
+        eastmoney.get_etf_index_fundamentals("515070.SS", "2026-11-13")

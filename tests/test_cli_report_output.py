@@ -180,3 +180,16 @@ def test_the_command_exits_one_and_names_the_available_analysts(monkeypatch):
     choices = result.output.split("choose from", 1)[1]
     for name in ("etf", "market", "news"):
         assert name in choices
+
+
+@pytest.mark.unit
+def test_a_pipe_run_does_not_start_the_rich_live_view():
+    """A pipe has no alternate screen; Live is skipped so its refresh thread and
+    teardown cannot delay the exit after the report is written."""
+    import inspect
+
+    from cli import run
+
+    source = inspect.getsource(run.run_analysis)
+    assert "stdout_is_a_terminal(console)" in source
+    assert "contextlib.nullcontext()" in source

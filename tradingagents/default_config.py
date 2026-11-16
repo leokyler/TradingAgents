@@ -212,7 +212,7 @@ def build_default_config() -> dict:
             # Fund-level data for A-share ETFs. Eastmoney (keyless) serves the
             # profile, the holdings and the basket valuation; Tushare serves the
             # profile only, so list it *before* eastmoney rather than alone.
-            "etf_data": "eastmoney",
+            "etf_data": "eastmoney,csindex",
         },
         # Tool-level configuration (takes precedence over category-level)
         "tool_vendors": {

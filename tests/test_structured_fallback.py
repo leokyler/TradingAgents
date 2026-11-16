@@ -187,3 +187,54 @@ def test_strict_mode_is_clean_without_a_fallback_or_missing_label():
          "trader_investment_plan": "FINAL TRANSACTION PROPOSAL: **HOLD**"},
         {"strict": True},
     )
+
+
+@pytest.mark.unit
+def test_the_forced_structural_failure_lands_in_the_report_stdout_and_strict(tmp_path, capsys):
+    """The three P1-6 acceptance points, driven by a real PM node fallback."""
+    from tradingagents.agents.managers.portfolio_manager import create_portfolio_manager
+    from tradingagents.reporting import write_report_tree
+
+    class _Structured:
+        def invoke(self, prompt):
+            raise ValueError("forced schema failure")
+
+    llm = MagicMock()
+    llm.with_structured_output.return_value = _Structured()
+    llm.invoke.return_value = MagicMock(content="**Rating**: Hold\n\nEvidence is balanced.")
+
+    state = {
+        "company_of_interest": "515070.SS",
+        "trade_date": "2026-11-13",
+        "asset_type": "etf",
+        "investment_plan": "**Recommendation**: Hold",
+        "trader_investment_plan": "FINAL TRANSACTION PROPOSAL: **HOLD**",
+        "past_context": "",
+        "risk_debate_state": {
+            "history": "risk debate", "aggressive_history": "", "conservative_history": "",
+            "neutral_history": "", "latest_speaker": "Judge",
+            "current_aggressive_response": "", "current_conservative_response": "",
+            "current_neutral_response": "", "count": 1,
+        },
+    }
+    result = create_portfolio_manager(llm)(state)
+    decision = result["final_trade_decision"]
+    assert decision.startswith(FREETEXT_FALLBACK_MARKER)
+
+    write_report_tree(
+        {"final_trade_decision": decision,
+         "trader_investment_plan": "FINAL TRANSACTION PROPOSAL: **HOLD**"},
+        "515070.SS", tmp_path, settings=None, html=False,
+    )
+    report = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
+    assert report.splitlines()[0] == FREETEXT_FALLBACK_MARKER
+
+    from cli.run import _enforce_strict, _report_structured_fallbacks
+
+    _report_structured_fallbacks(tmp_path / "message_tool.log")
+    assert "WARNING: Portfolio Manager structured output failed" in capsys.readouterr().out
+
+    import typer
+    with pytest.raises(typer.Exit) as exc:
+        _enforce_strict(result, {"strict": True})
+    assert exc.value.exit_code == 1

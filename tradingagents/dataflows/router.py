@@ -25,6 +25,9 @@ from tradingagents.dataflows.vendors.cn_news import (
     get_global_news as get_cn_news_global_news,
     get_news as get_cn_news,
 )
+from tradingagents.dataflows.vendors.csindex import (
+    get_etf_index_fundamentals as get_csindex_etf_index_fundamentals,
+)
 from tradingagents.dataflows.vendors.eastmoney import (
     get_etf_holdings as get_eastmoney_etf_holdings,
     get_etf_index_fundamentals as get_eastmoney_etf_index_fundamentals,
@@ -190,6 +193,9 @@ VENDOR_METHODS = {
     },
     "get_etf_index_fundamentals": {
         "eastmoney": get_eastmoney_etf_index_fundamentals,
+        # Index-level PE/dividend yield from CSI's public files: a second
+        # source when the fundf10 holdings page cannot be read.
+        "csindex": get_csindex_etf_index_fundamentals,
     },
 }
 

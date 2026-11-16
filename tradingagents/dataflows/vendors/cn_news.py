@@ -108,6 +108,18 @@ _GLOBAL_FEEDS = (
 )
 
 
+def missing_dependency() -> str | None:
+    """Why akshare is unavailable, without importing it; None when it is installed."""
+    import importlib.util
+
+    try:
+        if importlib.util.find_spec("akshare") is not None:
+            return None
+    except (ImportError, ValueError):
+        pass
+    return "akshare is not installed"
+
+
 def _import_akshare():
     """The installed ``akshare`` module, imported on first use.
 

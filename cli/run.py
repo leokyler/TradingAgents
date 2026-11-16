@@ -1,5 +1,6 @@
 """Running one analysis from the CLI: build the graph, stream it into the live view, save the report."""
 
+import contextlib
 import os
 import sys
 import time
@@ -22,6 +23,7 @@ from cli.display import (
     update_display,
     update_research_team_status,
 )
+from cli.plain_report import stdout_is_a_terminal
 from cli.selections import depth_from_env, get_user_selections, unattended_gaps
 from cli.stats_handler import StatsCallbackHandler
 from tradingagents.agents import structured as structured_output
@@ -32,6 +34,12 @@ from tradingagents.graph.analyst_execution import (
     build_analyst_execution_plan,
 )
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+
+def _timing(label: str) -> None:
+    """A timestamped phase marker, only when TRADINGAGENTS_TIMING is set."""
+    if os.environ.get("TRADINGAGENTS_TIMING"):
+        print(f"[timing] {label} {time.strftime('%H:%M:%S')}", file=sys.stderr, flush=True)
 
 
 def _run_directory(config: dict, ticker: str, trade_date: str) -> Path:
@@ -104,6 +112,37 @@ def _build_run_config(selections: dict, checkpoint: bool | None) -> dict:
     return config
 
 
+def _warn_if_cn_news_missing(selections):
+    """Say at start-up, not at the first news call, that akshare is missing.
+
+    Without it cn_news reports "not configured" and the news chain falls back to
+    Yahoo, which an A-share run usually cannot use; a warning here tells the
+    operator to install the extra before the run that will need it.
+    """
+    if selections.get("asset_type") != "etf":
+        return
+    try:
+        from tradingagents.dataflows.units import is_chinese
+        from tradingagents.dataflows.vendors.cn_news import missing_dependency
+
+        reason = missing_dependency()
+    except Exception:  # noqa: BLE001 - a warning must never stop the run
+        return
+    if not reason:
+        return
+    if is_chinese():
+        detail = "akshare 未安装" if reason == "akshare is not installed" else reason
+        console.print(
+            f"[yellow]cn_news 不可用：{detail}；新闻将退回 yfinance。"
+            f"安装：pip install \"tradingagents[cn]\"[/yellow]"
+        )
+    else:
+        console.print(
+            f"[yellow]cn_news unavailable: {reason}; news will fall back to yfinance. "
+            f"Install with pip install \"tradingagents[cn]\"[/yellow]"
+        )
+
+
 def run_analysis(checkpoint: bool | None = None, portfolio=None, flags=None):
     flags = flags or {}
     structured_output.reset_fallback_events()
@@ -119,6 +158,7 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None, flags=None):
 
     selections = get_user_selections(flags)
 
+    _warn_if_cn_news_missing(selections)
     config = _build_run_config(selections, checkpoint)
 
     stats_handler = StatsCallbackHandler()
@@ -195,7 +235,11 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None, flags=None):
 
     # The alternate screen keeps a layout taller than the window from redrawing
     # by scrolling; the final report prints after this block, on the normal screen.
-    with Live(layout, refresh_per_second=4, screen=True):
+    # A pipe has no screen to draw into, so skip Live entirely there: its refresh
+    # thread and alternate-screen teardown have no reader and only delay exit.
+    live = (Live(layout, refresh_per_second=4, screen=True)
+            if stdout_is_a_terminal(console) else contextlib.nullcontext())
+    with live:
         # Initial display
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
@@ -359,7 +403,9 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None, flags=None):
             # Clean run: log the decision, then drop this run's checkpoint so a
             # later run starts fresh. A mid-stream failure skips both, keeping
             # the checkpoint for resume.
+            _timing("graph-stream-done")
             graph.record_decision(selections["ticker"], selections["analysis_date"], final_state)
+            _timing("record-decision-done")
             graph.clear_checkpoint_on_success(
                 selections["ticker"], selections["analysis_date"], selections["asset_type"], portfolio
             )
@@ -394,8 +440,10 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None, flags=None):
         )
     console.print(f"[dim]{analyst_wall_time_tracker.format_summary()}[/dim]")
 
+    _timing("reports-start")
     _offer_reports(final_state, graph, selections["ticker"],
                    save=flags.get("save"), show=flags.get("show"), html=flags.get("html"))
+    _timing("reports-done")
 
     _report_structured_fallbacks(log_file)
     _enforce_strict(final_state, flags)
@@ -499,6 +547,7 @@ def _offer_reports(final_state, graph, ticker, save=None, show=None, html=None):
         saved = False
         try:
             report_file = graph.save_reports(final_state, ticker, save_path, html=html)
+            _timing("report-saved")
             saved = True
             console.print(f"\n[green]✓ Report saved to:[/green] {save_path.resolve()}")
             console.print(f"  [dim]Complete report:[/dim] {report_file.name}")
@@ -514,3 +563,4 @@ def _offer_reports(final_state, graph, ticker, save=None, show=None, html=None):
         show = typer.prompt("\nDisplay full report on screen?", default="Y").strip().upper() in ("Y", "YES", "")
     if show:
         display_complete_report(final_state)
+        _timing("report-shown")

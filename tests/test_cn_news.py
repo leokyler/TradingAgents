@@ -365,3 +365,21 @@ def test_global_news_falls_back_to_the_dated_eastmoney_search(monkeypatch):
     assert "旧闻" in out
     assert "未来" not in out
     assert "Published: 2026-11-12 15:30" in out
+
+
+@pytest.mark.unit
+def test_a_missing_akshare_warns_at_cli_startup(monkeypatch, capsys):
+    from cli import run
+    from tradingagents.dataflows import units
+    from tradingagents.dataflows.vendors import cn_news
+
+    monkeypatch.setattr(cn_news, "missing_dependency", lambda: "akshare is not installed")
+    monkeypatch.setattr(units, "is_chinese", lambda: True)
+
+    run._warn_if_cn_news_missing({"asset_type": "etf"})
+    out = capsys.readouterr().out
+    assert "cn_news 不可用" in out
+    assert "yfinance" in out
+
+    run._warn_if_cn_news_missing({"asset_type": "stock"})
+    assert capsys.readouterr().out == ""

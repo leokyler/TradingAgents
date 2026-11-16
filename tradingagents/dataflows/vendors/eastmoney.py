@@ -35,6 +35,7 @@ import logging
 import re
 from datetime import datetime
 
+from tradingagents.dataflows import units
 from tradingagents.dataflows.date_window import is_historical
 from tradingagents.dataflows.dates import parse_day
 from tradingagents.dataflows.errors import NoMarketDataError, VendorUnavailableError
@@ -59,8 +60,11 @@ _QUOTE_FIELDS = "f43,f44,f45,f46,f47,f48,f57,f58,f59,f60,f84,f116,f168,f169,f170
 _CONSTITUENT_FIELDS = "f57,f58,f116,f162,f167,f127"
 
 # A quote or a fund page that has not answered in five seconds is not going to:
-# the run has other work, and Eastmoney has other hosts.
+# the run has other work, and Eastmoney has other hosts. The holdings page is
+# the exception: it is the only route to the basket, its host is slow under
+# load, and a five-second cutoff cost the ETF analyst its whole valuation block.
 _TIMEOUT = 5.0
+_HOLDINGS_TIMEOUT = 12.0
 
 # The quarterly disclosure lags the quarter end by a few weeks. Asking for the
 # quarter that just ended usually returns the previous one, which the parser
@@ -68,13 +72,22 @@ _TIMEOUT = 5.0
 _QUARTER_MONTHS = (3, 6, 9, 12)
 
 
-def _get(url: str, *, params: dict | None = None, referer: str | None = None) -> str:
+def _get(url: str, *, params: dict | None = None, referer: str | None = None,
+         timeout: float | None = None) -> str:
     """GET an Eastmoney endpoint through the shared transport.
 
-    Spacing, the per-host cooldown and the browser fingerprint all live in
-    ``vendors.transport`` because the CN price vendor hits the same edge.
+    Spacing, the per-host cooldown, the single retry and the browser
+    fingerprint all live in ``vendors.transport`` because the CN price vendor
+    hits the same edge. ``timeout`` lets the holdings page use its own budget.
     """
-    return transport.get(url, params=params, referer=referer, timeout=_TIMEOUT, browser=True)
+    return transport.get(url, params=params, referer=referer,
+                         timeout=timeout or _TIMEOUT, browser=True)
+
+
+def _is_timeout(exc: Exception) -> bool:
+    """Whether a transport failure was a timeout rather than a refused connection."""
+    text = str(exc).lower()
+    return "timed out" in text or "timeout" in text
 
 
 def eastmoney_secid(ticker: str) -> str | None:
@@ -205,6 +218,7 @@ def _profile_metrics(code: str, secid: str) -> dict:
     nav_pair = _latest_nav(code)
     nav, nav_date = nav_pair if nav_pair else (None, "")
     return {
+        "code": code,
         "name": quote.get("f58") or code,
         "price": _as_float(quote.get("f43")),
         "prev": _as_float(quote.get("f60")),
@@ -220,26 +234,24 @@ def _profile_metrics(code: str, secid: str) -> dict:
     }
 
 
-def _profile_snapshot_lines(code: str, secid: str) -> list[str]:
+def _profile_snapshot_lines(metrics: dict) -> list[str]:
     """Current profile figures for a withheld run's nearest-snapshot block.
 
-    The units are the vendor-neutral English ones (CNY, shares, lots) so a data
-    block does not hardcode the run's output language; the model renders the
-    report in the configured language.
+    It renders the same metrics the served profile would, so a report never
+    carries two snapshots (and two share counts) taken seconds apart.
     """
-    metrics = _profile_metrics(code, secid)
+    code = metrics["code"]
     price, nav = metrics["price"], metrics["nav"]
     lines = [f"Snapshot values for {code} ({metrics['name']}):"]
     if price is not None:
         lines.append(f"- **Price**: {price:.3f} CNY")
     if metrics["volume"] is not None and metrics["amount"] is not None:
-        lines.append(f"- **Session volume**: {metrics['volume'] / 1e4:,.2f} 10k lots "
-                     f"(CNY {metrics['amount'] / 1e8:,.2f} 100m traded)")
+        lines.append(f"- **Session volume**: {units.lots(metrics['volume'])} "
+                     f"({units.money(metrics['amount'])} traded)")
     if metrics["shares"] is not None:
-        lines.append(f"- **Shares outstanding**: {metrics['shares'] / 1e8:,.2f} 100m shares")
+        lines.append(f"- **Shares outstanding**: {units.shares(metrics['shares'])}")
     if metrics["market_value"] is not None:
-        lines.append(f"- **Fund size (shares x price)**: "
-                     f"CNY {metrics['market_value'] / 1e8:,.2f} 100m")
+        lines.append(f"- **Fund size (shares x price)**: {units.money(metrics['market_value'])}")
     if nav is not None:
         lines.append(f"- **Latest published NAV**: {nav:.4f} ({metrics['nav_date']})")
         premium = _premium(price, nav)
@@ -295,16 +307,20 @@ def get_etf_profile(ticker: str, as_of_date: str | None = None) -> str:
     code = _guard(ticker)
     secid = eastmoney_secid(canonical) or f"1.{code}"
 
+    # One snapshot read per call: the served block and the withheld notice both
+    # render these metrics, so they cannot disagree on shares, size or volume.
+    try:
+        metrics = _profile_metrics(code, secid)
+    except Exception as exc:  # noqa: BLE001
+        if as_of_date and is_historical(as_of_date):
+            return _data_unavailable("ETF profile", canonical, as_of_date, exc)
+        raise
+
     serve, note = _point_in_time(canonical, as_of_date)
     if not serve:
         clock = session_clock(canonical, as_of_date or "")
-        try:
-            detail = "\n".join(_profile_snapshot_lines(code, secid))
-        except Exception as exc:  # noqa: BLE001 - report the failed read, don't end the run
-            return _data_unavailable("ETF profile", canonical, as_of_date or "", exc)
+        detail = "\n".join(_profile_snapshot_lines(metrics))
         return _structural_notice("ETF profile", canonical, as_of_date or "", clock, detail)
-
-    metrics = _profile_metrics(code, secid)
     name = metrics["name"]
     price, prev = metrics["price"], metrics["prev"]
     change, pct = metrics["change"], metrics["pct"]
@@ -325,12 +341,12 @@ def get_etf_profile(ticker: str, as_of_date: str | None = None) -> str:
     if prev is not None:
         lines.append(f"- **Previous close**: {prev:.3f} CNY")
     if volume is not None and amount is not None:
-        lines.append(f"- **Session volume**: {_fmt(volume / 1e4, ' 万手')} "
-                     f"({_fmt(amount / 1e8, ' 亿元')} traded)")
+        lines.append(f"- **Session volume**: {units.lots(volume)} "
+                     f"({units.money(amount)} traded)")
     if shares is not None:
-        lines.append(f"- **Shares outstanding**: {_fmt(shares / 1e8, ' 亿份')}")
+        lines.append(f"- **Shares outstanding**: {units.shares(shares)}")
     if market_value is not None:
-        lines.append(f"- **Fund size (shares x price)**: {_fmt(market_value / 1e8, ' 亿元')}")
+        lines.append(f"- **Fund size (shares x price)**: {units.money(market_value)}")
     if nav is not None:
         lines.append(f"- **Latest published NAV**: {nav:.4f} ({nav_date})")
         premium = _premium(price, nav)
@@ -371,7 +387,8 @@ def _holdings_rows(code: str, as_of_date: str | None = None, limit: int = 10,
         year, month = _last_quarter_end(as_of_date)
         params.update({"year": str(year), "month": str(month)})
 
-    body = _get(_HOLDINGS_URL, params=params, referer=_HOLDINGS_REFERER.format(code=code))
+    body = _get(_HOLDINGS_URL, params=params, referer=_HOLDINGS_REFERER.format(code=code),
+                timeout=_HOLDINGS_TIMEOUT)
     headers = re.findall(r"<h4[^>]*>(.*?)</h4>", body, re.S)
     tables = re.findall(r"<table[^>]*>(.*?)</table>", body, re.S)
 
@@ -593,7 +610,15 @@ def get_etf_index_fundamentals(ticker: str, as_of_date: str | None = None, limit
             "ETF index fundamentals", canonical, as_of_date or "", clock, detail
         )
 
-    data = _holdings_rows(code, as_of_date, limit)
+    try:
+        data = _holdings_rows(code, as_of_date, limit)
+    except VendorUnavailableError as exc:
+        if _is_timeout(exc):
+            raise VendorUnavailableError(
+                f"fundf10 valuation request timed out after {_HOLDINGS_TIMEOUT:.0f}s "
+                f"(retried once): {exc}"
+            ) from exc
+        raise
 
     report_date = data["report_date"]
     if as_of_date and report_date and report_date > as_of_date:
@@ -605,12 +630,14 @@ def get_etf_index_fundamentals(ticker: str, as_of_date: str | None = None, limit
     if not data["rows"]:
         # A bond, commodity or money-market fund holds no equities, so a basket
         # PE/PB does not exist for it. Say that, rather than reporting no data.
+        # A timeout is a different answer and was raised above, not described here.
         return (
             f"# ETF index fundamentals for {canonical}\n\n"
             "Basket valuation does not apply: this fund discloses no equity "
             "holdings (a bond, commodity or money-market fund). Its return is "
             "driven by the yield curve, the metal price or money-market rates, "
-            "not by a PE multiple."
+            "not by a PE multiple. (The vendor returned no equity rows; this is "
+            "not a timeout.)"
         )
 
     aggregate = _covered_valuation(data["rows"])

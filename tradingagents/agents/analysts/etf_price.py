@@ -21,7 +21,7 @@ from datetime import timedelta
 
 import pandas as pd
 
-from tradingagents.dataflows import prices
+from tradingagents.dataflows import prices, units
 from tradingagents.dataflows.dates import parse_day
 from tradingagents.dataflows.router import get_cn_market_stock
 
@@ -100,7 +100,7 @@ def _pct(value: float | None) -> str:
 
 
 def _money(value: float | None) -> str:
-    return "n/a" if value is None else f"CNY {value / 1e8:,.2f} 100m"
+    return "n/a" if value is None else units.money(value)
 
 
 def build_price_window(ticker: str, trade_date: str) -> str:

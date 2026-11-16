@@ -164,8 +164,9 @@ Extras work the same way (`uv tool install ".[bedrock]" --python 3.13`), `uvx
 tradingagents` removes it. A-share news needs the optional `cn` extra:
 `pip install ".[cn]"` (or `uv tool install ".[cn]"`) installs `akshare`, which
 `cn_news` imports lazily. Without it the vendor reports itself as not configured
-and the news chain falls through to Yahoo; A-share prices and fund data need no
-extra.
+and the news chain falls through to Yahoo, which an A-share run usually cannot
+use; the CLI prints that warning at start-up. `csindex` (the second valuation
+source) also needs the `cn` extra. A-share prices and fund data need no extra.
 
 The `.env` file is read from the directory the command is started in, so run it
 from the checkout, or export the `TRADINGAGENTS_*` variables and API keys.

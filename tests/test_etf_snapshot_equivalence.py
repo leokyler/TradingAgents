@@ -43,7 +43,7 @@ def _quote_pages():
 
 
 def _fake_get(pages):
-    def fake(url, *, params=None, referer=None):
+    def fake(url, *, params=None, referer=None, timeout=None):
         for fragment, body in pages.items():
             if fragment in url:
                 return body if isinstance(body, str) else json.dumps(body)
@@ -106,7 +106,7 @@ class TestSnapshotEquivalence:
 ",rc:0};
 """
 
-        def fake(url, *, params=None, referer=None):
+        def fake(url, *, params=None, referer=None, timeout=None):
             if eastmoney._HOLDINGS_URL in url:
                 return holdings
             if params and params.get("secid") == "1.600519":
@@ -259,3 +259,59 @@ def test_the_profile_uses_the_real_clock_and_the_daily_bars(monkeypatch):
     assert "0.885" in released
     assert "STRUCTURALLY_UNAVAILABLE" in withheld
     assert "its newest closed session is 2026-11-13" in withheld
+
+
+@pytest.mark.unit
+def test_one_snapshot_fetch_per_profile_call(monkeypatch):
+    """The served block and the withheld notice render the same metrics object."""
+    calls = []
+    metrics = {
+        "code": "515070", "name": "人工智能ETF华夏", "price": 0.885, "prev": 0.902,
+        "change": -0.017, "pct": -1.88, "volume": 1040351, "amount": 93694477.0,
+        "shares": 7203000000.0, "market_value": 6374655000.0, "turnover": 1.44,
+        "nav": 0.8853, "nav_date": "2026-11-13",
+    }
+    monkeypatch.setattr(eastmoney, "_profile_metrics",
+                        lambda code, secid: calls.append(1) or metrics)
+    monkeypatch.setattr(eastmoney, "_point_in_time", lambda canonical, as_of: (False, ""))
+    monkeypatch.setattr(eastmoney, "session_clock", lambda *a: _fake_clock(after=3, days=3))
+
+    out = eastmoney.get_etf_profile("515070.SS", "2026-11-10")
+
+    assert calls == [1]
+    assert "0.885" in out and "72.03" in out
+
+
+@pytest.mark.unit
+def test_the_served_and_withheld_blocks_use_one_unit_style(monkeypatch):
+    """Both branches localize through the same helper, so one report has one style."""
+    import copy
+
+    import tradingagents.dataflows.config as config_module
+    from tradingagents.dataflows.config import set_config
+
+    original = copy.deepcopy(config_module._config)
+    try:
+        set_config({"output_language": "中文"})
+        metrics = {
+            "code": "515070", "name": "人工智能ETF华夏", "price": 0.885, "prev": 0.902,
+            "change": -0.017, "pct": -1.88, "volume": 1040351, "amount": 93694477.0,
+            "shares": 7203000000.0, "market_value": 6374655000.0, "turnover": 1.44,
+            "nav": 0.8853, "nav_date": "2026-11-13",
+        }
+        monkeypatch.setattr(eastmoney, "_profile_metrics",
+                            lambda code, secid: metrics)
+        monkeypatch.setattr(eastmoney, "_point_in_time", lambda canonical, as_of: (True, ""))
+        served = eastmoney.get_etf_profile("515070.SS", "2026-11-13")
+
+        monkeypatch.setattr(eastmoney, "_point_in_time", lambda canonical, as_of: (False, ""))
+        monkeypatch.setattr(eastmoney, "session_clock", lambda *a: _fake_clock(after=3, days=3))
+        withheld = eastmoney.get_etf_profile("515070.SS", "2026-11-10")
+
+        for out in (served, withheld):
+            assert "72.03 亿份" in out
+            assert "63.75 亿元" in out
+            assert "0.94 亿元" in out
+            assert "100m shares" not in out
+    finally:
+        config_module._config = original
